@@ -8,6 +8,7 @@ import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import com.joeabouserhal.financetracker.theme.LocalThemeSpec
@@ -21,7 +22,8 @@ fun BrTextField(
   modifier: Modifier = Modifier,
   enabled: Boolean = true,
   singleLine: Boolean = true,
-  keyboardOptions: KeyboardOptions = KeyboardOptions.Default,
+  keyboardOptions: KeyboardOptions =
+    KeyboardOptions.Default.copy(capitalization = KeyboardCapitalization.Sentences),
   visualTransformation: VisualTransformation = VisualTransformation.None,
   suffix: (@Composable () -> Unit)? = null,
 ) {
