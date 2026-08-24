@@ -9,8 +9,11 @@ import kotlinx.serialization.Serializable
 /** Auth flow: Email / Google / Continue as guest. */
 @Serializable data object AuthFlow : NavKey
 
-/** Add a new transaction. */
-@Serializable data object AddTransaction : NavKey
+/** Add a new transaction (optionally pre-filled from a preset). */
+@Serializable data class AddTransaction(val presetId: String? = null) : NavKey
+
+/** Preset picker for "add from preset" (pushed from the FAB menu). */
+@Serializable data object PresetPicker : NavKey
 
 /** Edit an existing transaction. */
 @Serializable data class EditTransaction(val transactionId: String) : NavKey

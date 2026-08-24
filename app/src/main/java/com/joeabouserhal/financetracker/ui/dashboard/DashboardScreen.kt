@@ -9,12 +9,15 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -33,10 +36,13 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.PathEffect
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.joeabouserhal.financetracker.data.repositories.CurrencyBalance
 import com.joeabouserhal.financetracker.data.repositories.DashboardData
@@ -46,7 +52,8 @@ import com.joeabouserhal.financetracker.data.session.Session
 import com.joeabouserhal.financetracker.theme.LocalThemeSpec
 import com.joeabouserhal.financetracker.ui.components.BrButton
 import com.joeabouserhal.financetracker.ui.components.BrButtonStyle
-import com.joeabouserhal.financetracker.ui.components.BrFab
+import com.joeabouserhal.financetracker.ui.components.BrChip
+import com.joeabouserhal.financetracker.ui.components.ExpandableFab
 import com.joeabouserhal.financetracker.ui.components.EmptyState
 import com.joeabouserhal.financetracker.ui.components.ScreenHeader
 import com.joeabouserhal.financetracker.ui.rememberAppContainer
@@ -63,6 +70,7 @@ import java.time.YearMonth
 @Composable
 fun DashboardScreen(
   onAddTransaction: () -> Unit,
+  onAddFromPreset: () -> Unit,
   onEditTransaction: (String) -> Unit,
   onSeeAllTransactions: () -> Unit,
 ) {
@@ -98,6 +106,7 @@ fun DashboardScreen(
             month = month,
             onPrevious = { monthIso = month.minusMonths(1).toString() },
             onNext = { monthIso = month.plusMonths(1).toString() },
+            onMonthSelected = { monthIso = it.toString() },
             monthly = data.monthly,
           )
         }
@@ -108,8 +117,9 @@ fun DashboardScreen(
         Spacer(Modifier.height(80.dp))
       }
 
-      BrFab(
-        onClick = onAddTransaction,
+      ExpandableFab(
+        onAddTransaction = onAddTransaction,
+        onAddFromPreset = onAddFromPreset,
         modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp),
       )
     }
@@ -123,7 +133,28 @@ fun DashboardScreen(
 @Composable
 private fun SectionLabel(text: String) {
   val spec = LocalThemeSpec.current
-  Text(text, style = MaterialTheme.typography.labelMedium, color = spec.accent)
+  Text(
+    text,
+    style = MaterialTheme.typography.labelMedium,
+    color = spec.accent,
+    modifier =
+      Modifier
+        .drawBehind {
+          // Dotted underline: only under the text, faint accent dots so the
+          // label keeps its hierarchy without drawing the eye. The bottom
+          // padding below gives the dots a small gap from the glyphs.
+          val y = size.height - 2.dp.toPx()
+          drawLine(
+            color = spec.accent.copy(alpha = 0.5f),
+            start = Offset(0f, y),
+            end = Offset(size.width, y),
+            strokeWidth = 2.dp.toPx(),
+            cap = StrokeCap.Round,
+            pathEffect = PathEffect.dashPathEffect(floatArrayOf(0f, 5.5.dp.toPx()), 0f),
+          )
+        }
+        .padding(bottom = 5.dp),
+  )
 }
 
 @Composable
@@ -160,16 +191,22 @@ private fun DashedDivider() {
 
 @Composable
 private fun BalanceSection(balances: List<CurrencyBalance>) {
+  val spec = LocalThemeSpec.current
+  // Zero balances add noise: only show currencies that actually have a balance.
+  val nonzeroBalances = balances.filter { it.totalMinor != 0L }
   Column(verticalArrangement = Arrangement.spacedBy(20.dp)) {
     SectionLabel("BALANCE")
-    if (balances.isEmpty()) {
-      EmptyState(message = "No accounts yet — add a currency & account in Settings")
-    } else {
-      balances.forEachIndexed { index, balance ->
-        CurrencyBalanceBlock(balance)
-        // One receipt-style dashed rule between currency groups only.
-        if (index < balances.lastIndex) DashedDivider()
-      }
+    when {
+      balances.isEmpty() ->
+        EmptyState(message = "No accounts yet — add a currency & account in Settings")
+      nonzeroBalances.isEmpty() ->
+        Text("All balances are zero.", style = MaterialTheme.typography.bodyMedium, color = spec.muted)
+      else ->
+        nonzeroBalances.forEachIndexed { index, balance ->
+          CurrencyBalanceBlock(balance)
+          // One receipt-style dashed rule between currency groups only.
+          if (index < nonzeroBalances.lastIndex) DashedDivider()
+        }
     }
   }
 }
@@ -220,9 +257,11 @@ private fun CurrencyBalanceBlock(balance: CurrencyBalance) {
 
     // Accounts beneath: smaller text than the total row, amounts right-aligned.
     // A single account adds no breakdown value — the total already IS it.
-    if (balance.accounts.size > 1) {
+    // Zero-balance accounts are hidden too.
+    val shownAccounts = balance.accounts.filter { it.balanceMinor != 0L }
+    if (shownAccounts.size > 1) {
       Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        balance.accounts.forEach { account ->
+        shownAccounts.forEach { account ->
           Row(
             Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
@@ -258,29 +297,40 @@ private fun ActivitySection(
   month: YearMonth,
   onPrevious: () -> Unit,
   onNext: () -> Unit,
+  onMonthSelected: (YearMonth) -> Unit,
   monthly: List<MonthlyActivity>,
 ) {
   val spec = LocalThemeSpec.current
+  var showMonthPicker by remember { mutableStateOf(false) }
   Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
     SectionLabel("ACTIVITY")
 
     Row(
       Modifier.fillMaxWidth(),
       verticalAlignment = Alignment.CenterVertically,
-      horizontalArrangement = Arrangement.SpaceBetween,
+      horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
       MonthArrow("<", onPrevious)
-      AnimatedContent(
-        targetState = month,
-        transitionSpec = { fadeIn(tween(160)) togetherWith fadeOut(tween(120)) },
-        label = "monthLabel",
-      ) { m ->
-        Text(
-          Dates.monthLabel(m).uppercase(),
-          style = MaterialTheme.typography.labelLarge,
-          color = spec.ink,
-          fontWeight = FontWeight.Bold,
-        )
+      Box(
+        Modifier
+          .weight(1f)
+          .height(56.dp)
+          .background(spec.surface)
+          .clickable { showMonthPicker = true },
+        contentAlignment = Alignment.Center,
+      ) {
+        AnimatedContent(
+          targetState = month,
+          transitionSpec = { fadeIn(tween(160)) togetherWith fadeOut(tween(120)) },
+          label = "monthLabel",
+        ) { m ->
+          Text(
+            Dates.monthLabel(m).uppercase(),
+            style = MaterialTheme.typography.labelLarge,
+            color = spec.ink,
+            fontWeight = FontWeight.Bold,
+          )
+        }
       }
       MonthArrow(">", onNext, enabled = month < YearMonth.now())
     }
@@ -291,20 +341,121 @@ private fun ActivitySection(
       monthly.forEach { activity -> ActivityBlock(activity) }
     }
   }
+
+  if (showMonthPicker) {
+    MonthPickerDialog(
+      current = month,
+      onDismiss = { showMonthPicker = false },
+      onSelect = {
+        showMonthPicker = false
+        onMonthSelected(it)
+      },
+    )
+  }
+}
+
+@Composable
+private fun MonthPickerDialog(
+  current: YearMonth,
+  onDismiss: () -> Unit,
+  onSelect: (YearMonth) -> Unit,
+) {
+  val spec = LocalThemeSpec.current
+  var year by remember { mutableStateOf(current.year) }
+  val monthNames =
+    listOf("JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC")
+
+  Dialog(onDismissRequest = onDismiss) {
+    Column(
+      Modifier
+        .fillMaxWidth()
+        .background(spec.surface)
+        .padding(16.dp),
+      verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+      Row(
+        Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+      ) {
+        Text("PICK MONTH", style = MaterialTheme.typography.labelLarge, color = spec.ink)
+        Text("✕", style = MaterialTheme.typography.labelLarge, color = spec.muted, modifier = Modifier.clickable(onClick = onDismiss).padding(4.dp))
+      }
+
+      // ------------------------------------------------------------------ YEAR
+      Text("YEAR", style = MaterialTheme.typography.labelSmall, color = spec.muted)
+      Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.horizontalScroll(rememberScrollState())) {
+        val maxYear = YearMonth.now().year
+        ((maxYear) downTo (maxYear - 10)).forEach { y ->
+          val selected = year == y
+          Box(
+            Modifier
+              .background(if (selected) spec.accent else spec.surfaceAlt)
+              .border(1.dp, if (selected) spec.accent else spec.border)
+              .clickable { year = y }
+              .padding(horizontal = 16.dp, vertical = 8.dp),
+            contentAlignment = Alignment.Center,
+          ) {
+            Text(
+              y.toString(),
+              style = MaterialTheme.typography.labelMedium,
+              color = if (selected) spec.onAccent else spec.ink,
+              fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
+            )
+          }
+        }
+      }
+
+      Box(Modifier.fillMaxWidth().height(1.dp).background(spec.border.copy(alpha = 0.4f)))
+
+      // ----------------------------------------------------------------- MONTH
+      Text("MONTH", style = MaterialTheme.typography.labelSmall, color = spec.muted)
+      monthNames.chunked(4).forEach { row ->
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth()) {
+          row.forEach { name ->
+            val monthValue = monthNames.indexOf(name) + 1
+            val selected = year == current.year && monthValue == current.monthValue
+            Box(
+              Modifier
+                .weight(1f)
+                .aspectRatio(1.6f)
+                .background(if (selected) spec.accent else spec.surfaceAlt)
+                .border(1.dp, if (selected) spec.accent else spec.border)
+                .clickable { onSelect(YearMonth.of(year, monthValue)) },
+              contentAlignment = Alignment.Center,
+            ) {
+              Text(
+                name,
+                style = MaterialTheme.typography.labelMedium,
+                color = if (selected) spec.onAccent else spec.ink,
+                fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
+              )
+            }
+          }
+        }
+      }
+    }
+  }
 }
 
 @Composable
 private fun MonthArrow(label: String, onClick: () -> Unit, enabled: Boolean = true) {
   val spec = LocalThemeSpec.current
-  Text(
-    text = label,
-    style = MaterialTheme.typography.headlineSmall,
-    color = if (enabled) spec.accent else spec.muted.copy(alpha = 0.4f),
-    modifier = Modifier
-      .padding(horizontal = 16.dp, vertical = 4.dp)
+  Box(
+    Modifier
       .minimumInteractiveComponentSize()
+      .height(56.dp)
+      .background(spec.surface)
       .clickable(enabled = enabled, onClick = onClick),
-  )
+    contentAlignment = Alignment.Center,
+  ) {
+    Text(
+      text = label,
+      style = MaterialTheme.typography.headlineSmall,
+      color = if (enabled) spec.accent else spec.muted.copy(alpha = 0.4f),
+      modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
+    )
+  }
 }
 
 @Composable

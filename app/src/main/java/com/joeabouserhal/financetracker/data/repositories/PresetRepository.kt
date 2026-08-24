@@ -17,6 +17,8 @@ class PresetRepository(
   fun observeByType(ownerId: String, type: TransactionType): Flow<List<PresetEntity>> =
     dao.observeByType(ownerId, type)
 
+  fun observeAll(ownerId: String): Flow<List<PresetEntity>> = dao.observeAll(ownerId)
+
   suspend fun add(
     ownerId: String,
     name: String,

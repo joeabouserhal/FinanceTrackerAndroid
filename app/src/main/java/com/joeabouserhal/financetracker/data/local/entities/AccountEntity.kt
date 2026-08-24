@@ -29,6 +29,7 @@ data class AccountEntity(
   @ColumnInfo(name = "currency_id") val currencyId: String,
   val name: String,
   val archived: Boolean = false,
+  @ColumnInfo(name = "is_default", defaultValue = "0") val isDefault: Boolean = false,
   @ColumnInfo(name = "created_at") val createdAt: String,
   @ColumnInfo(name = "updated_at", defaultValue = "''") val updatedAt: String,
 )

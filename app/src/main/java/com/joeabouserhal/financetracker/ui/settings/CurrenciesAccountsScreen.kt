@@ -74,8 +74,6 @@ fun CurrenciesAccountsScreen(
     .collectAsStateWithLifecycle(initialValue = emptyList())
   val archivedAccounts by remember(ownerId) { container.accountRepository.observeArchived(ownerId) }
     .collectAsStateWithLifecycle(initialValue = emptyList())
-  val transactions by remember(ownerId) { container.transactionRepository.observeAll(ownerId) }
-    .collectAsStateWithLifecycle(initialValue = emptyList())
 
   var showAddCurrency by remember { mutableStateOf(false) }
   var editingCurrency by remember { mutableStateOf<CurrencyEntity?>(null) }
@@ -84,11 +82,6 @@ fun CurrenciesAccountsScreen(
   var editingAccount by remember { mutableStateOf<AccountEntity?>(null) }
   var error by remember { mutableStateOf<String?>(null) }
   var info by remember { mutableStateOf<String?>(null) }
-
-  fun balanceOf(account: AccountEntity): Long =
-    transactions.filter { it.accountId == account.id }.sumOf {
-      if (it.type == TransactionType.INCOME) it.amount else -it.amount
-    }
 
   Column(modifier.fillMaxSize().background(spec.background)) {
     Row(
@@ -104,12 +97,15 @@ fun CurrenciesAccountsScreen(
         .fillMaxSize()
         .verticalScroll(rememberScrollState())
         .padding(horizontal = 16.dp),
-      verticalArrangement = Arrangement.spacedBy(12.dp),
+      verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
       error?.let { Text(it, style = MaterialTheme.typography.labelMedium, color = spec.expense) }
       info?.let { Text(it, style = MaterialTheme.typography.labelMedium, color = spec.accent) }
 
       BrButton(text = "+ Add currency", onClick = { showAddCurrency = true })
+
+      // Extra breathing room between the action button and the first card.
+      Spacer(Modifier.height(12.dp))
 
       if (currencies.isEmpty()) {
         Text("No currencies yet.", style = MaterialTheme.typography.bodyMedium, color = spec.muted)
@@ -120,7 +116,6 @@ fun CurrenciesAccountsScreen(
         CurrencyCard(
           currency = currency,
           accounts = currencyAccounts,
-          balanceOf = ::balanceOf,
           onSetDefault = {
             scope.launch {
               try {
@@ -135,6 +130,15 @@ fun CurrenciesAccountsScreen(
           onOpenAccount = onOpenAccount,
           onAddAccount = { addingAccountFor = currency },
           onEditAccount = { editingAccount = it },
+          onSetDefaultAccount = { account ->
+            scope.launch {
+              try {
+                container.accountRepository.setDefault(ownerId, account.id)
+                info = "${account.name} is now the default account for ${currency.code}"
+                error = null
+              } catch (e: Exception) { error = e.message }
+            }
+          },
           onArchiveAccount = { account ->
             scope.launch {
               try {
@@ -144,6 +148,8 @@ fun CurrenciesAccountsScreen(
             }
           },
         )
+        // Clear separation between currency cards.
+        Spacer(Modifier.height(12.dp))
       }
 
       if (archivedAccounts.isNotEmpty()) {
@@ -169,7 +175,7 @@ fun CurrenciesAccountsScreen(
         }
       }
 
-      Spacer(Modifier.padding(vertical = 24.dp))
+      Spacer(Modifier.height(12.dp))
     }
   }
 
@@ -280,18 +286,18 @@ fun CurrenciesAccountsScreen(
 private fun CurrencyCard(
   currency: CurrencyEntity,
   accounts: List<AccountEntity>,
-  balanceOf: (AccountEntity) -> Long,
   onSetDefault: () -> Unit,
   onEdit: () -> Unit,
   onDelete: () -> Unit,
   onOpenAccount: (String) -> Unit,
   onAddAccount: () -> Unit,
   onEditAccount: (AccountEntity) -> Unit,
+  onSetDefaultAccount: (AccountEntity) -> Unit,
   onArchiveAccount: (AccountEntity) -> Unit,
 ) {
   val spec = LocalThemeSpec.current
   BrCard(bordered = true, contentPadding = PaddingValues(12.dp)) {
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
       // Currency header: code + symbol + default badge, actions on the right.
       Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
@@ -331,27 +337,16 @@ private fun CurrencyCard(
       if (accounts.isEmpty()) {
         Text("No accounts yet — tap “+ Account”.", style = MaterialTheme.typography.bodySmall, color = spec.muted)
       } else {
-        Column(Modifier.fillMaxWidth().padding(start = 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Column(Modifier.fillMaxWidth().padding(start = 8.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
           accounts.forEach { account ->
             AccountRow(
               account = account,
-              balance = balanceOf(account),
-              symbol = currency.symbol,
               onOpen = { onOpenAccount(account.id) },
               onEdit = { onEditAccount(account) },
+              onSetDefault = { onSetDefaultAccount(account) },
               onArchive = { onArchiveAccount(account) },
             )
           }
-        }
-        val total = accounts.sumOf(balanceOf)
-        Row(Modifier.fillMaxWidth().padding(start = 8.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-          Text("TOTAL", style = MaterialTheme.typography.labelSmall, color = spec.muted)
-          Text(
-            Money.format(total, currency.symbol, forceDecimals = true),
-            style = MaterialTheme.typography.labelLarge,
-            color = if (total < 0) spec.expense else spec.ink,
-            fontWeight = FontWeight.Bold,
-          )
         }
       }
 
@@ -365,31 +360,36 @@ private fun CurrencyCard(
 @Composable
 private fun AccountRow(
   account: AccountEntity,
-  balance: Long,
-  symbol: String,
   onOpen: () -> Unit,
   onEdit: () -> Unit,
+  onSetDefault: () -> Unit,
   onArchive: () -> Unit,
 ) {
   val spec = LocalThemeSpec.current
   Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
     Row(
-      Modifier.weight(1f).minimumInteractiveComponentSize().clickable(onClick = onOpen).padding(vertical = 8.dp),
+      Modifier.weight(1f).minimumInteractiveComponentSize().clickable(onClick = onOpen).padding(vertical = 4.dp),
       verticalAlignment = Alignment.CenterVertically,
     ) {
       Box(Modifier.size(6.dp).background(spec.accent))
       Spacer(Modifier.width(8.dp))
       Text(account.name, style = MaterialTheme.typography.bodyMedium, color = spec.ink)
+      if (account.isDefault) {
+        Spacer(Modifier.width(6.dp))
+        Text(
+          "DEFAULT",
+          style = MaterialTheme.typography.labelSmall,
+          color = spec.onAccent,
+          modifier = Modifier.background(spec.accent).padding(horizontal = 4.dp, vertical = 1.dp),
+        )
+      }
     }
     Row(verticalAlignment = Alignment.CenterVertically) {
-      Text(
-        Money.format(balance, symbol),
-        style = MaterialTheme.typography.labelMedium,
-        color = if (balance < 0) spec.expense else spec.ink,
-      )
-      Spacer(Modifier.width(10.dp))
-      Text("EDIT", style = MaterialTheme.typography.labelSmall, color = spec.accent, modifier = Modifier.padding(4.dp).minimumInteractiveComponentSize().clickable(onClick = onEdit))
-      Text("HIDE", style = MaterialTheme.typography.labelSmall, color = spec.muted, modifier = Modifier.padding(4.dp).minimumInteractiveComponentSize().clickable(onClick = onArchive))
+      if (!account.isDefault) {
+        Text("SET DEFAULT", style = MaterialTheme.typography.labelSmall, color = spec.muted, modifier = Modifier.padding(2.dp).minimumInteractiveComponentSize().clickable(onClick = onSetDefault))
+      }
+      Text("EDIT", style = MaterialTheme.typography.labelSmall, color = spec.accent, modifier = Modifier.padding(2.dp).minimumInteractiveComponentSize().clickable(onClick = onEdit))
+      Text("HIDE", style = MaterialTheme.typography.labelSmall, color = spec.muted, modifier = Modifier.padding(2.dp).minimumInteractiveComponentSize().clickable(onClick = onArchive))
     }
   }
 }

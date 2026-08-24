@@ -17,6 +17,8 @@ class CategoryRepository(
   fun observeByType(ownerId: String, type: TransactionType): Flow<List<CategoryEntity>> =
     dao.observeByType(ownerId, type)
 
+  fun observeAll(ownerId: String): Flow<List<CategoryEntity>> = dao.observeAll(ownerId)
+
   suspend fun add(ownerId: String, name: String, type: TransactionType, color: String): CategoryEntity {
     require(name.trim().isNotBlank()) { "Category name is required" }
     require(dao.getAll(ownerId).none { it.type == type && it.name.equals(name.trim(), ignoreCase = true) }) {
@@ -41,15 +43,15 @@ class CategoryRepository(
     return entity
   }
 
-  suspend fun update(ownerId: String, id: String, name: String, color: String) {
+  suspend fun update(ownerId: String, id: String, name: String, type: TransactionType, color: String) {
     require(name.trim().isNotBlank()) { "Category name is required" }
     require(
-      dao.getAll(ownerId).none { it.id != id && it.type == dao.getById(ownerId, id)?.type && it.name.equals(name.trim(), ignoreCase = true) },
+      dao.getAll(ownerId).none { it.id != id && it.type == type && it.name.equals(name.trim(), ignoreCase = true) },
     ) {
       "A category named \"${name.trim()}\" already exists"
     }
     db.withTransaction {
-      dao.update(ownerId, id, name.trim(), color.ifBlank { "#77746C" }, java.time.Instant.now().toString())
+      dao.update(ownerId, id, name.trim(), type, color.ifBlank { "#77746C" }, java.time.Instant.now().toString())
       dao.getById(ownerId, id)?.let { full ->
         OutboxWriter.enqueue(db, ownerId, "categories", OutboxAction.UPDATE, OutboxWriter.category(ownerId, full))
       }

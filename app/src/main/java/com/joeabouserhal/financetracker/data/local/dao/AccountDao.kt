@@ -40,7 +40,7 @@ interface AccountDao {
   @Query("UPDATE accounts SET name = :name, currency_id = :currencyId, updated_at = :updatedAt WHERE owner_id = :ownerId AND id = :id")
   suspend fun update(ownerId: String, id: String, name: String, currencyId: String, updatedAt: String)
 
-  @Query("UPDATE accounts SET archived = 1, updated_at = :updatedAt WHERE owner_id = :ownerId AND id = :id")
+  @Query("UPDATE accounts SET archived = 1, is_default = 0, updated_at = :updatedAt WHERE owner_id = :ownerId AND id = :id")
   suspend fun archive(ownerId: String, id: String, updatedAt: String)
 
   @Query("UPDATE accounts SET archived = 0, updated_at = :updatedAt WHERE owner_id = :ownerId AND id = :id")
@@ -50,11 +50,21 @@ interface AccountDao {
   @Query(
     """
     UPDATE accounts
-    SET currency_id = :currencyId, name = :name, archived = :archived, updated_at = :updatedAt
+    SET currency_id = :currencyId, name = :name, archived = :archived, is_default = :isDefault, updated_at = :updatedAt
     WHERE owner_id = :ownerId AND id = :id
     """
   )
-  suspend fun updateFromSync(ownerId: String, id: String, currencyId: String, name: String, archived: Boolean, updatedAt: String)
+  suspend fun updateFromSync(ownerId: String, id: String, currencyId: String, name: String, archived: Boolean, isDefault: Boolean, updatedAt: String)
+
+  @Query("UPDATE accounts SET is_default = 0, updated_at = :updatedAt WHERE owner_id = :ownerId AND currency_id = :currencyId AND is_default = 1")
+  suspend fun clearDefaultForCurrency(ownerId: String, currencyId: String, updatedAt: String)
+
+  /** Sync-side invariant fix: ensure exactly one default per currency. */
+  @Query("UPDATE accounts SET is_default = 0 WHERE owner_id = :ownerId AND currency_id = :currencyId AND is_default = 1 AND id != :exceptId")
+  suspend fun clearDefaultExceptForCurrency(ownerId: String, currencyId: String, exceptId: String)
+
+  @Query("UPDATE accounts SET is_default = 1, updated_at = :updatedAt WHERE owner_id = :ownerId AND id = :id")
+  suspend fun setDefault(ownerId: String, id: String, updatedAt: String)
 
   @Query("DELETE FROM accounts WHERE owner_id = :ownerId AND id = :id")
   suspend fun delete(ownerId: String, id: String)

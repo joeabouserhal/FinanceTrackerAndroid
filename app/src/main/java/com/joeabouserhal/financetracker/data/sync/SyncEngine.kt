@@ -162,9 +162,14 @@ class SyncEngine(
     val dao = db.accountDao()
     val local = dao.getById(ownerId, remote.id)
     when {
-      local == null -> dao.insertAll(listOf(remote))
-      SyncMappers.remoteAtLeastAsNew(local.updatedAt, remote.updatedAt) ->
-        dao.updateFromSync(ownerId, remote.id, remote.currencyId, remote.name, remote.archived, remote.updatedAt)
+      local == null -> {
+        dao.insertAll(listOf(remote))
+        if (remote.isDefault) dao.clearDefaultExceptForCurrency(ownerId, remote.currencyId, remote.id)
+      }
+      SyncMappers.remoteAtLeastAsNew(local.updatedAt, remote.updatedAt) -> {
+        dao.updateFromSync(ownerId, remote.id, remote.currencyId, remote.name, remote.archived, remote.isDefault, remote.updatedAt)
+        if (remote.isDefault) dao.clearDefaultExceptForCurrency(ownerId, remote.currencyId, remote.id)
+      }
     }
   }
 

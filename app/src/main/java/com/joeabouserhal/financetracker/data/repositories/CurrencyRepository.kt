@@ -60,6 +60,7 @@ class CurrencyRepository(
           currencyId = entity.id,
           name = "Cash",
           archived = false,
+          isDefault = true,
           createdAt = accountNow,
           updatedAt = accountNow,
         )

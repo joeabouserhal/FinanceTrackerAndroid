@@ -24,7 +24,7 @@ fun ScreenHeader(
     modifier
       .fillMaxWidth()
       .background(spec.background)
-      .padding(horizontal = 16.dp, vertical = 14.dp),
+      .padding(horizontal = 16.dp, vertical = 24.dp),
   ) {
     Text(title, style = MaterialTheme.typography.headlineLarge, color = spec.ink)
     if (subtitle != null) {

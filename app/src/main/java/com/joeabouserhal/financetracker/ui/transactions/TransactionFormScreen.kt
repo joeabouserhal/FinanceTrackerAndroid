@@ -1,11 +1,5 @@
 package com.joeabouserhal.financetracker.ui.transactions
 
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.tween
-import androidx.compose.animation.expandVertically
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -49,7 +43,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.joeabouserhal.financetracker.data.local.entities.PresetEntity
 import com.joeabouserhal.financetracker.data.local.entities.TransactionEntity
 import com.joeabouserhal.financetracker.data.local.entities.TransactionType
 import com.joeabouserhal.financetracker.data.session.Session
@@ -72,6 +65,7 @@ import kotlinx.coroutines.launch
 @Composable
 fun TransactionFormScreen(
   transactionId: String?,
+  presetId: String? = null,
   onBack: () -> Unit,
   onSaved: () -> Unit,
   modifier: Modifier = Modifier,
@@ -101,18 +95,21 @@ fun TransactionFormScreen(
   var categorySearch by remember { mutableStateOf("") }
   var error by remember { mutableStateOf<String?>(null) }
 
-  val categories by remember(ownerId, type) { container.categoryRepository.observeByType(ownerId, type) }
-    .collectAsStateWithLifecycle(initialValue = emptyList())
-  val presets by remember(ownerId, type) { container.presetRepository.observeByType(ownerId, type) }
+  // All categories are loaded once; the per-type view is derived locally so
+  // a type switch never races the flow reload and can't clobber a selection
+  // that a preset just made.
+  val allCategories by remember(ownerId) { container.categoryRepository.observeAll(ownerId) }
     .collectAsStateWithLifecycle(initialValue = emptyList())
 
   // "Other" is always first in the list.
-  val orderedCategories = remember(categories) {
-    categories.sortedWith(
-      compareBy<com.joeabouserhal.financetracker.data.local.entities.CategoryEntity> {
-        if (it.isDefault && it.name == "Other") 0 else 1
-      }.thenBy { it.name },
-    )
+  val orderedCategories = remember(allCategories, type) {
+    allCategories
+      .filter { it.type == type }
+      .sortedWith(
+        compareBy<com.joeabouserhal.financetracker.data.local.entities.CategoryEntity> {
+          if (it.isDefault && it.name == "Other") 0 else 1
+        }.thenBy { it.name },
+      )
   }
 
   val currencyOptions = currencies
@@ -133,36 +130,52 @@ fun TransactionFormScreen(
     }
   }
 
+  // Pre-fill the form from a picked preset (add-from-preset flow).
+  LaunchedEffect(presetId, ownerId) {
+    val preset = presetId?.let { container.appDatabase.presetDao().getById(ownerId, it) }
+    if (preset != null) {
+      type = preset.type
+      preset.defaultAmount?.let { amountText = formatAmountForInput(it) }
+      preset.defaultCurrencyId?.let { selectedCurrencyId = it }
+      preset.defaultAccountId?.let { selectedAccountId = it }
+      preset.defaultCategoryId?.let { selectedCategoryId = it }
+      title = preset.name
+    }
+  }
+
   // React to the currencies list arriving: always keep a valid selection and
-  // default to the default currency (USD by default) in add mode.
+  // default to the default currency (USD by default) in add mode. Never
+  // clobber a selection while the list is still loading (preset pre-fill).
   LaunchedEffect(currencies) {
-    if (selectedCurrencyId == null || currencies.none { it.id == selectedCurrencyId }) {
+    if (currencies.isNotEmpty() &&
+      (selectedCurrencyId == null || currencies.none { it.id == selectedCurrencyId })
+    ) {
       selectedCurrencyId = currencies.firstOrNull { it.isDefault }?.id ?: currencies.firstOrNull()?.id
     }
   }
 
   // React to the accounts list arriving: keep a valid account for the
-  // selected currency.
+  // selected currency, preferring that currency's default account.
   LaunchedEffect(accounts, selectedCurrencyId) {
-    if (selectedAccountId == null || accounts.none { it.id == selectedAccountId && it.currencyId == selectedCurrencyId }) {
-      selectedAccountId = accounts.firstOrNull { it.currencyId == selectedCurrencyId }?.id
+    if (accounts.isNotEmpty() &&
+      (selectedAccountId == null || accounts.none { it.id == selectedAccountId && it.currencyId == selectedCurrencyId })
+    ) {
+      val forCurrency = accounts.filter { it.currencyId == selectedCurrencyId }
+      selectedAccountId = forCurrency.firstOrNull { it.isDefault }?.id ?: forCurrency.firstOrNull()?.id
     }
   }
 
   // Keep a category always selected: whenever the list for the current type
   // doesn't contain the selection (e.g. after switching Expense ↔ Income),
-  // fall back to the first entry, which is the seeded "Other".
+  // fall back to the first entry, which is the seeded "Other". Only acts on a
+  // loaded list so a preset's category survives the loading gap.
   LaunchedEffect(type, orderedCategories) {
-    if (selectedCategoryId == null || orderedCategories.none { it.id == selectedCategoryId }) {
-      selectedCategoryId = orderedCategories.firstOrNull()?.id
+    when {
+      selectedCategoryId == null ->
+        selectedCategoryId = orderedCategories.firstOrNull()?.id
+      orderedCategories.isNotEmpty() && orderedCategories.none { it.id == selectedCategoryId } ->
+        selectedCategoryId = orderedCategories.firstOrNull()?.id
     }
-  }
-
-  fun applyPreset(preset: PresetEntity) {
-    preset.defaultAmount?.let { amountText = formatAmountForInput(it) }
-    preset.defaultCurrencyId?.let { selectedCurrencyId = it }
-    preset.defaultAccountId?.let { selectedAccountId = it }
-    preset.defaultCategoryId?.let { selectedCategoryId = it }
   }
 
   fun save() {
@@ -259,21 +272,6 @@ fun TransactionFormScreen(
         .padding(horizontal = 16.dp),
       verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-      AnimatedVisibility(
-        visible = presets.isNotEmpty(),
-        enter = expandVertically(tween(180)) + fadeIn(tween(180)),
-        exit = shrinkVertically(tween(150)) + fadeOut(tween(150)),
-      ) {
-        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-          Text("QUICK PRESETS", style = MaterialTheme.typography.labelSmall, color = spec.muted)
-          Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            presets.forEach { preset ->
-              BrChip(preset.name, selected = false, onClick = { applyPreset(preset) })
-            }
-          }
-        }
-      }
-
       BrTextField(
         value = amountText,
         onValueChange = { amountText = it },
@@ -281,6 +279,11 @@ fun TransactionFormScreen(
         modifier = Modifier.fillMaxWidth(),
         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
         visualTransformation = remember { ThousandsSeparatorTransformation() },
+        suffix = {
+          currencies.firstOrNull { it.id == selectedCurrencyId }?.symbol?.let { symbol ->
+            Text(symbol, style = MaterialTheme.typography.bodyLarge, color = spec.muted)
+          }
+        },
       )
 
       BrTextField(value = title, onValueChange = { title = it }, label = "TITLE (OPTIONAL)", modifier = Modifier.fillMaxWidth())
@@ -288,7 +291,15 @@ fun TransactionFormScreen(
       SectionLabel("CURRENCY")
       Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
         currencyOptions.forEach { currency ->
-          BrChip(currency.code, selected = selectedCurrencyId == currency.id, onClick = { selectedCurrencyId = currency.id; selectedAccountId = accounts.firstOrNull { it.currencyId == currency.id }?.id })
+          BrChip(
+            currency.code,
+            selected = selectedCurrencyId == currency.id,
+            onClick = {
+              selectedCurrencyId = currency.id
+              val forCurrency = accounts.filter { it.currencyId == currency.id }
+              selectedAccountId = forCurrency.firstOrNull { it.isDefault }?.id ?: forCurrency.firstOrNull()?.id
+            },
+          )
         }
       }
 
@@ -459,9 +470,6 @@ private fun SectionLabel(text: String) {
   val spec = LocalThemeSpec.current
   Text(text, style = MaterialTheme.typography.labelSmall, color = spec.muted)
 }
-
-private fun parseCategoryColor(hex: String): androidx.compose.ui.graphics.Color =
-  try { androidx.compose.ui.graphics.Color(android.graphics.Color.parseColor(hex)) } catch (_: IllegalArgumentException) { androidx.compose.ui.graphics.Color(0xFF77746C) }
 
 private fun formatAmountForInput(minor: Long): String {
   val whole = minor / 100

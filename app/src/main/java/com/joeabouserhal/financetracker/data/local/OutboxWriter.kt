@@ -77,6 +77,7 @@ object OutboxWriter {
         "currency_id" to JsonPrimitive(e.currencyId),
         "name" to JsonPrimitive(e.name),
         "archived" to JsonPrimitive(e.archived),
+        "is_default" to JsonPrimitive(e.isDefault),
       ),
     )
 

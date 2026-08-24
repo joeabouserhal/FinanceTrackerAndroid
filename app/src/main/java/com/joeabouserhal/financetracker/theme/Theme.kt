@@ -1,11 +1,14 @@
 package com.joeabouserhal.financetracker.theme
 
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Shapes
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.joeabouserhal.financetracker.FinanceTrackerApplication
 import com.joeabouserhal.financetracker.data.settings.ThemeMode
@@ -29,7 +32,21 @@ fun FinanceTrackerTheme(content: @Composable () -> Unit) {
 @Composable
 fun FinanceTrackerTheme(spec: ThemeSpec, content: @Composable () -> Unit) {
   CompositionLocalProvider(LocalThemeSpec provides spec) {
-    MaterialTheme(colorScheme = spec.toColorScheme(), typography = AppTypography, content = content)
+    // Brutalist: every Material shape (dialogs, date picker, sheets, …) is
+    // sharp-cornered instead of the default rounded corners.
+    MaterialTheme(
+      colorScheme = spec.toColorScheme(),
+      typography = AppTypography,
+      shapes =
+        Shapes(
+          extraSmall = RoundedCornerShape(0.dp),
+          small = RoundedCornerShape(0.dp),
+          medium = RoundedCornerShape(0.dp),
+          large = RoundedCornerShape(0.dp),
+          extraLarge = RoundedCornerShape(0.dp),
+        ),
+      content = content,
+    )
   }
 }
 

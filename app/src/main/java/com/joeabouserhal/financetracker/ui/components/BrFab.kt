@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.size
 import androidx.compose.material3.Icon
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
@@ -19,19 +20,20 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.joeabouserhal.financetracker.R
 import com.joeabouserhal.financetracker.theme.LocalThemeSpec
 
 /**
  * Circular floating action button: accent face, offset hard shadow, thin
- * border, press-down scale spring. Same FAB used on Dashboard and
- * Transactions.
+ * border, press-down scale spring.
  */
 @Composable
 fun BrFab(
   onClick: () -> Unit,
   modifier: Modifier = Modifier,
   contentDescription: String = "Add transaction",
+  showCloseIcon: Boolean = false,
 ) {
   val spec = LocalThemeSpec.current
   val interactionSource = remember { MutableInteractionSource() }
@@ -62,12 +64,16 @@ fun BrFab(
         ),
       contentAlignment = Alignment.Center,
     ) {
-      Icon(
-        painter = painterResource(R.drawable.ic_add),
-        contentDescription = contentDescription,
-        tint = spec.onAccent,
-        modifier = Modifier.size(32.dp),
-      )
+      if (showCloseIcon) {
+        Text("✕", color = spec.onAccent, fontSize = 26.sp)
+      } else {
+        Icon(
+          painter = painterResource(R.drawable.ic_add),
+          contentDescription = contentDescription,
+          tint = spec.onAccent,
+          modifier = Modifier.size(32.dp),
+        )
+      }
     }
   }
 }

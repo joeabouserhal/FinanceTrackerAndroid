@@ -33,7 +33,7 @@ import com.joeabouserhal.financetracker.data.local.entities.TransactionEntity
       OutboxEntity::class,
       SyncMetaEntity::class,
     ],
-  version = 4,
+  version = 5,
   exportSchema = true,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -92,5 +92,23 @@ object Migrations {
       }
     }
 
-  val ALL: Array<Migration> = arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
+  val MIGRATION_4_5 =
+    object : Migration(4, 5) {
+      override fun migrate(db: SupportSQLiteDatabase) {
+        // Default account per currency: one active account per currency is
+        // promoted so existing data has exactly one default.
+        db.execSQL("ALTER TABLE `accounts` ADD COLUMN `is_default` INTEGER NOT NULL DEFAULT 0")
+        db.execSQL(
+          """
+          UPDATE `accounts`
+          SET `is_default` = 1
+          WHERE `archived` = 0 AND `id` IN (
+            SELECT MIN(`id`) FROM `accounts` WHERE `archived` = 0 GROUP BY `owner_id`, `currency_id`
+          )
+          """.trimIndent(),
+        )
+      }
+    }
+
+  val ALL: Array<Migration> = arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
 }

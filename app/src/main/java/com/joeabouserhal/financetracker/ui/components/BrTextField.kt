@@ -23,6 +23,7 @@ fun BrTextField(
   singleLine: Boolean = true,
   keyboardOptions: KeyboardOptions = KeyboardOptions.Default,
   visualTransformation: VisualTransformation = VisualTransformation.None,
+  suffix: (@Composable () -> Unit)? = null,
 ) {
   val spec = LocalThemeSpec.current
   OutlinedTextField(
@@ -35,6 +36,7 @@ fun BrTextField(
     shape = RectangleShape,
     keyboardOptions = keyboardOptions,
     visualTransformation = visualTransformation,
+    suffix = suffix,
     textStyle = MaterialTheme.typography.bodyLarge.copy(color = spec.ink),
     colors =
       OutlinedTextFieldDefaults.colors(

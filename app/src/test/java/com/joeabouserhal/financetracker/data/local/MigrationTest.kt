@@ -128,9 +128,31 @@ class MigrationTest {
   }
 
   @Test
-  fun `fresh install DDL matches the exported schema`() {
+  fun `migrate 4 to 5 adds account default and promotes one per currency`() {
     val db = openVersion(4)
-    assertMatchesExportedSchema(db, 4)
+    db.execSQL(
+      "INSERT INTO accounts (id, owner_id, currency_id, name, archived, created_at, updated_at) VALUES " +
+        "('acc-a', 'user-1', 'cur-1', 'Alpha', 0, '2026-08-01T10:00:00Z', '2026-08-01T10:00:00Z'), " +
+        "('acc-b', 'user-1', 'cur-1', 'Beta', 0, '2026-08-01T10:00:00Z', '2026-08-01T10:00:00Z'), " +
+        "('acc-h', 'user-1', 'cur-1', 'Hidden', 1, '2026-08-01T10:00:00Z', '2026-08-01T10:00:00Z')",
+    )
+
+    Migrations.MIGRATION_4_5.migrate(db)
+
+    db.query("SELECT id, is_default FROM accounts ORDER BY id").use { cursor ->
+      val rows = mutableMapOf<String, Int>()
+      while (cursor.moveToNext()) rows[cursor.getString(0)] = cursor.getInt(1)
+      assertEquals(1, rows.filterValues { it == 1 }.size)
+      assertEquals(0, rows["acc-h"])
+    }
+    assertMatchesExportedSchema(db, 5)
+    db.close()
+  }
+
+  @Test
+  fun `fresh install DDL matches the exported schema`() {
+    val db = openVersion(5)
+    assertMatchesExportedSchema(db, 5)
     db.close()
   }
 

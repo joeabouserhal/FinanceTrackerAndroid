@@ -41,8 +41,8 @@ interface CategoryDao {
   @Insert(onConflict = OnConflictStrategy.IGNORE)
   suspend fun insertAll(entities: List<CategoryEntity>)
 
-  @Query("UPDATE categories SET name = :name, color = :color, updated_at = :updatedAt WHERE owner_id = :ownerId AND id = :id")
-  suspend fun update(ownerId: String, id: String, name: String, color: String, updatedAt: String)
+  @Query("UPDATE categories SET name = :name, type = :type, color = :color, updated_at = :updatedAt WHERE owner_id = :ownerId AND id = :id")
+  suspend fun update(ownerId: String, id: String, name: String, type: TransactionType, color: String, updatedAt: String)
 
   /** Pull-applied update: real UPDATE, never REPLACE. */
   @Query(

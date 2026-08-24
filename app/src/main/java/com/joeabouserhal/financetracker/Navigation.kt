@@ -14,7 +14,10 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -25,6 +28,7 @@ import androidx.navigation3.ui.NavDisplay
 import com.joeabouserhal.financetracker.ui.auth.AuthScreen
 import com.joeabouserhal.financetracker.ui.categories.CategoriesScreen
 import com.joeabouserhal.financetracker.ui.main.MainTabs
+import com.joeabouserhal.financetracker.ui.presets.PresetPickerScreen
 import com.joeabouserhal.financetracker.ui.rememberAppContainer
 import com.joeabouserhal.financetracker.ui.settings.AccountDetailScreen
 import com.joeabouserhal.financetracker.ui.settings.CurrenciesAccountsScreen
@@ -106,7 +110,8 @@ fun MainNavigation() {
           }
           entry<Main> {
             MainTabs(
-              onAddTransaction = { backStack.add(AddTransaction) },
+              onAddTransaction = { backStack.add(AddTransaction(presetId = null)) },
+              onOpenPresetPicker = { backStack.add(PresetPicker) },
               onEditTransaction = { transactionId -> backStack.add(EditTransaction(transactionId)) },
               onOpenCurrenciesAccounts = { backStack.add(CurrenciesAccounts) },
               onOpenThemes = { backStack.add(Themes) },
@@ -114,11 +119,41 @@ fun MainNavigation() {
               onOpenAuth = { backStack.add(AuthFlow) },
             )
           }
-          entry<AddTransaction> {
+          entry<AddTransaction> { navKey ->
             TransactionFormScreen(
               transactionId = null,
+              presetId = navKey.presetId,
+              onBack = {
+                // ✕ from a preset-prefilled form skips the picker entirely
+                // and returns straight to the page that opened the flow.
+                if (navKey.presetId != null && backStack.getOrNull(backStack.size - 2) is PresetPicker) {
+                  backStack.removeLastOrNull() // the form
+                  backStack.removeLastOrNull() // the preset picker
+                } else {
+                  backStack.removeLastOrNull()
+                }
+              },
+              onSaved = {
+                // Saving from a preset-prefilled form also skips the picker:
+                // the transaction is done, so land back on the origin page.
+                if (navKey.presetId != null && backStack.getOrNull(backStack.size - 2) is PresetPicker) {
+                  backStack.removeLastOrNull()
+                  backStack.removeLastOrNull()
+                } else {
+                  backStack.removeLastOrNull()
+                }
+              },
+            )
+          }
+          entry<PresetPicker> {
+            PresetPickerScreen(
               onBack = { backStack.removeLastOrNull() },
-              onSaved = { backStack.removeLastOrNull() },
+              onPick = { presetId ->
+                // Keep the picker underneath so backing out of the form
+                // returns to "Add from preset".
+                backStack.add(AddTransaction(presetId = presetId))
+              },
+              modifier = Modifier.safeDrawingPadding(),
             )
           }
           entry<EditTransaction> { navKey ->

@@ -46,6 +46,7 @@ object GuestSeeder {
         currencyId = currencyId,
         name = "Cash",
         archived = false,
+        isDefault = true,
         createdAt = accountNow,
         updatedAt = accountNow,
       )

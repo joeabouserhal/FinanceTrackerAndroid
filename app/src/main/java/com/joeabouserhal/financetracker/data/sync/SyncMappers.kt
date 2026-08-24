@@ -52,6 +52,7 @@ object SyncMappers {
       currencyId = row.reqString("currency_id"),
       name = row.reqString("name"),
       archived = row.optBool("archived"),
+      isDefault = row.optBool("is_default"),
       createdAt = row.createdAt(),
       updatedAt = row.reqString("updated_at"),
     )
