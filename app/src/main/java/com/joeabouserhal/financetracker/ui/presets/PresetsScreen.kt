@@ -45,6 +45,7 @@ import com.joeabouserhal.financetracker.ui.components.BrTextField
 import com.joeabouserhal.financetracker.ui.components.ScreenHeader
 import com.joeabouserhal.financetracker.ui.rememberAppContainer
 import com.joeabouserhal.financetracker.utils.Money
+import com.joeabouserhal.financetracker.utils.parseHexColor
 import java.math.BigDecimal
 import java.math.RoundingMode
 import kotlinx.coroutines.launch
@@ -105,7 +106,7 @@ fun PresetsScreen(
       error?.let { Text(it, style = MaterialTheme.typography.labelMedium, color = spec.expense) }
 
       presets.forEach { preset ->
-        PresetRow(
+        PresetRowView(
           preset,
           currencies,
           accounts,
@@ -180,40 +181,6 @@ fun PresetsScreen(
 }
 
 @Composable
-private fun PresetRow(
-  preset: PresetEntity,
-  currencies: List<com.joeabouserhal.financetracker.data.local.entities.CurrencyEntity>,
-  accounts: List<com.joeabouserhal.financetracker.data.local.entities.AccountEntity>,
-  categories: List<com.joeabouserhal.financetracker.data.local.entities.CategoryEntity>,
-  onTap: () -> Unit,
-) {
-  val spec = LocalThemeSpec.current
-  val currency = currencies.firstOrNull { it.id == preset.defaultCurrencyId }
-  val account = accounts.firstOrNull { it.id == preset.defaultAccountId }
-  val category = categories.firstOrNull { it.id == preset.defaultCategoryId }
-  val summary = listOfNotNull(category?.name, account?.name).joinToString(" · ")
-
-  Row(
-    Modifier.fillMaxWidth().background(spec.surface).clickable(onClick = onTap).padding(horizontal = 12.dp, vertical = 10.dp),
-    verticalAlignment = Alignment.CenterVertically,
-  ) {
-    Column(Modifier.weight(1f)) {
-      Text(preset.name, style = MaterialTheme.typography.bodyMedium, color = spec.ink)
-      if (summary.isNotBlank()) {
-        Text(summary, style = MaterialTheme.typography.labelSmall, color = spec.muted)
-      }
-    }
-    preset.defaultAmount?.let { amount ->
-      Text(
-        Money.format(amount, currency?.symbol ?: ""),
-        style = MaterialTheme.typography.bodyMedium,
-        color = if (preset.type == TransactionType.EXPENSE) spec.expense else spec.income,
-      )
-    }
-  }
-}
-
-@Composable
 private fun PresetDialog(
   title: String,
   initial: PresetEntity?,
@@ -281,7 +248,7 @@ private fun PresetDialog(
         dialogError = "Preset name is required"
       } else {
         val amount = amountText.trim().takeIf { it.isNotBlank() }?.let {
-          try { BigDecimal(it).setScale(2, RoundingMode.HALF_UP).movePointRight(2).longValueExact() } catch (_: Exception) { null }
+          try { BigDecimal(Money.normalizeDecimalInput(it)).setScale(2, RoundingMode.HALF_UP).movePointRight(2).longValueExact() } catch (_: Exception) { null }
         }
         if (amountText.isNotBlank() && (amount == null || amount <= 0)) {
           dialogError = "Amount must be a positive number"
@@ -403,5 +370,4 @@ private fun PresetDialog(
   }
 }
 
-private fun parsePresetColor(hex: String): androidx.compose.ui.graphics.Color =
-  try { androidx.compose.ui.graphics.Color(android.graphics.Color.parseColor(hex)) } catch (_: IllegalArgumentException) { androidx.compose.ui.graphics.Color(0xFF77746C) }
+private fun parsePresetColor(hex: String): androidx.compose.ui.graphics.Color = parseHexColor(hex)

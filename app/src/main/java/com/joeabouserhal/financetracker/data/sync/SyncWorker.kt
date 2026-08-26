@@ -28,7 +28,8 @@ class SyncWorker(appContext: Context, params: WorkerParameters) : CoroutineWorke
     val app = applicationContext as? FinanceTrackerApplication ?: return Result.success()
     return when (val outcome = app.container.syncEngine.sync()) {
       is SyncOutcome.Skipped -> Result.success()
-      is SyncOutcome.Completed -> if (outcome.isClean) Result.success() else Result.retry()
+      // Dead ops (given up) don't force a retry: only live failures do.
+      is SyncOutcome.Completed -> if (outcome.failedOps == 0 && !outcome.pullFailed) Result.success() else Result.retry()
     }
   }
 

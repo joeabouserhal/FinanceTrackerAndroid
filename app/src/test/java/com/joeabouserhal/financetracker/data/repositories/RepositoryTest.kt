@@ -9,6 +9,9 @@ import com.joeabouserhal.financetracker.data.local.dao.AccountDao
 import com.joeabouserhal.financetracker.data.local.dao.CategoryDao
 import com.joeabouserhal.financetracker.data.local.dao.CurrencyDao
 import com.joeabouserhal.financetracker.data.local.dao.TransactionDao
+import com.joeabouserhal.financetracker.data.local.entities.CategoryEntity
+import com.joeabouserhal.financetracker.data.local.entities.OutboxAction
+import com.joeabouserhal.financetracker.data.local.entities.PresetEntity
 import com.joeabouserhal.financetracker.data.local.entities.TransactionType
 import com.joeabouserhal.financetracker.data.local.seed.GuestSeeder
 import kotlinx.coroutines.flow.first
@@ -361,5 +364,91 @@ class RepositoryTest {
     assertEquals(1, accounts.size)
     assertEquals("Cash", accounts.single().name)
     assertEquals(0, db.outboxDao().getAllForOwner(GUEST_OWNER_ID).size) // guest: no ops
+  }
+
+  @Test
+  fun `editing a transaction keeps its preset lineage when presetId is null`() = runTest {
+    val userId = "user-preset-lineage"
+    val currency = currencyRepo.add(userId, "USD", "$", "US Dollar")
+    val account = accountRepo.observeActive(userId).first().first()
+    // Fresh non-guest owners have no seeded categories — create the "Other"
+    // fallback the repository resolves against.
+    val now = "2026-08-01T10:00:00Z"
+    db.categoryDao()
+      .upsert(
+        CategoryEntity(
+          id = "other-lineage",
+          ownerId = userId,
+          name = "Other",
+          type = TransactionType.EXPENSE,
+          color = "#77746C",
+          isDefault = true,
+          createdAt = now,
+          updatedAt = now,
+        )
+      )
+    val other = db.categoryDao().getDefaultOther(userId, TransactionType.EXPENSE)!!
+    // preset_id has a FK to presets — create the preset row first.
+    db.presetDao()
+      .upsert(
+        PresetEntity(
+          id = "preset-1",
+          ownerId = userId,
+          name = "Test preset",
+          type = TransactionType.EXPENSE,
+          defaultAmount = 1000,
+          defaultCurrencyId = currency.id,
+          defaultCategoryId = other.id,
+          defaultAccountId = account.id,
+          archived = false,
+          createdAt = now,
+          updatedAt = now,
+        )
+      )
+
+    val tx =
+      transactionRepo.add(
+        ownerId = userId,
+        type = TransactionType.EXPENSE,
+        amount = 1000,
+        currencyId = currency.id,
+        categoryId = other.id,
+        accountId = account.id,
+        date = null,
+        title = "From preset",
+        notes = null,
+        presetId = "preset-1",
+      )
+
+    transactionRepo.update(
+      ownerId = userId,
+      id = tx.id,
+      type = TransactionType.EXPENSE,
+      amount = 1500,
+      currencyId = currency.id,
+      categoryId = other.id,
+      accountId = account.id,
+      date = tx.date,
+      title = "Edited manually",
+      notes = null,
+      presetId = null, // the form always passes null — lineage must survive
+    )
+
+    assertEquals("preset-1", db.transactionDao().getById(userId, tx.id)?.presetId)
+  }
+
+  @Test
+  fun `renaming an account enqueues only the changed row`() = runTest {
+    val userId = "user-account-enqueue"
+    currencyRepo.add(userId, "USD", "$", "US Dollar")
+    val cash = accountRepo.observeActive(userId).first().first()
+    accountRepo.add(userId, cash.currencyId, "Wallet") // second account, untouched
+
+    val opsBefore = db.outboxDao().getAllForOwnerAndTable(userId, "accounts").size
+    accountRepo.update(userId, cash.id, "Cash Renamed", cash.currencyId)
+    val opsAfter = db.outboxDao().getAllForOwnerAndTable(userId, "accounts")
+
+    assertEquals(opsBefore + 1, opsAfter.size)
+    assertEquals(OutboxAction.UPDATE, opsAfter.last().action)
   }
 }

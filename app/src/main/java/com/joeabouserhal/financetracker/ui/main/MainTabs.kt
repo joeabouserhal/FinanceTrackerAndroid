@@ -21,6 +21,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.joeabouserhal.financetracker.R
@@ -70,6 +71,10 @@ fun MainTabs(
 ) {
   var selectedTab by rememberSaveable { mutableStateOf(MainTab.DASHBOARD) }
 
+  // Keeps each tab's rememberSaveable state (search, filters, scroll) alive
+  // across tab switches — without this, switching tabs reset them all.
+  val tabStateHolder = rememberSaveableStateHolder()
+
   // Hoisted out of PresetsScreen: the tab's composition is disposed on every
   // tab switch, so any state kept there (like the ALL/Expense/Income filter)
   // would reset and make presets of the other type seem to "disappear".
@@ -86,31 +91,33 @@ fun MainTabs(
         transitionSpec = { fadeIn(tween(180)) togetherWith fadeOut(tween(140)) },
         label = "tabContent",
       ) { tab ->
-        when (tab) {
-          MainTab.DASHBOARD ->
-            DashboardScreen(
+        tabStateHolder.SaveableStateProvider(tab.name) {
+          when (tab) {
+            MainTab.DASHBOARD ->
+              DashboardScreen(
+                onAddTransaction = onAddTransaction,
+                onAddFromPreset = onOpenPresetPicker,
+                onEditTransaction = onEditTransaction,
+                onSeeAllTransactions = { selectedTab = MainTab.TRANSACTIONS },
+              )
+            MainTab.TRANSACTIONS -> TransactionsScreen(
               onAddTransaction = onAddTransaction,
               onAddFromPreset = onOpenPresetPicker,
               onEditTransaction = onEditTransaction,
-              onSeeAllTransactions = { selectedTab = MainTab.TRANSACTIONS },
             )
-          MainTab.TRANSACTIONS -> TransactionsScreen(
-            onAddTransaction = onAddTransaction,
-            onAddFromPreset = onOpenPresetPicker,
-            onEditTransaction = onEditTransaction,
-          )
-          MainTab.PRESETS ->
-            PresetsScreen(
-              filter = presetsFilter,
-              onFilterChange = { presetsFilter = it },
+            MainTab.PRESETS ->
+              PresetsScreen(
+                filter = presetsFilter,
+                onFilterChange = { presetsFilter = it },
+              )
+            MainTab.REPORT -> ReportScreen()
+            MainTab.OPTIONS -> OptionsScreen(
+              onOpenCurrenciesAccounts = onOpenCurrenciesAccounts,
+              onOpenThemes = onOpenThemes,
+              onOpenCategories = onOpenCategories,
+              onSignIn = onOpenAuth,
             )
-          MainTab.REPORT -> ReportScreen()
-          MainTab.OPTIONS -> OptionsScreen(
-            onOpenCurrenciesAccounts = onOpenCurrenciesAccounts,
-            onOpenThemes = onOpenThemes,
-            onOpenCategories = onOpenCategories,
-            onSignIn = onOpenAuth,
-          )
+          }
         }
       }
     }

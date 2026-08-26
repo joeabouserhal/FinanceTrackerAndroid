@@ -9,15 +9,13 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -40,9 +38,9 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.window.Dialog
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.joeabouserhal.financetracker.data.repositories.CurrencyBalance
 import com.joeabouserhal.financetracker.data.repositories.DashboardData
@@ -61,6 +59,7 @@ import com.joeabouserhal.financetracker.ui.transactions.TransactionRow
 import com.joeabouserhal.financetracker.utils.Dates
 import com.joeabouserhal.financetracker.utils.Money
 import java.time.YearMonth
+import kotlin.math.roundToInt
 
 /**
  * Flat dashboard: BALANCE / ACTIVITY / RECENT separated by hairlines, no
@@ -355,90 +354,6 @@ private fun ActivitySection(
 }
 
 @Composable
-private fun MonthPickerDialog(
-  current: YearMonth,
-  onDismiss: () -> Unit,
-  onSelect: (YearMonth) -> Unit,
-) {
-  val spec = LocalThemeSpec.current
-  var year by remember { mutableStateOf(current.year) }
-  val monthNames =
-    listOf("JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC")
-
-  Dialog(onDismissRequest = onDismiss) {
-    Column(
-      Modifier
-        .fillMaxWidth()
-        .background(spec.surface)
-        .padding(16.dp),
-      verticalArrangement = Arrangement.spacedBy(10.dp),
-    ) {
-      Row(
-        Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically,
-      ) {
-        Text("PICK MONTH", style = MaterialTheme.typography.labelLarge, color = spec.ink)
-        Text("✕", style = MaterialTheme.typography.labelLarge, color = spec.muted, modifier = Modifier.clickable(onClick = onDismiss).padding(4.dp))
-      }
-
-      // ------------------------------------------------------------------ YEAR
-      Text("YEAR", style = MaterialTheme.typography.labelSmall, color = spec.muted)
-      Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.horizontalScroll(rememberScrollState())) {
-        val maxYear = YearMonth.now().year
-        ((maxYear) downTo (maxYear - 10)).forEach { y ->
-          val selected = year == y
-          Box(
-            Modifier
-              .background(if (selected) spec.accent else spec.surfaceAlt)
-              .border(1.dp, if (selected) spec.accent else spec.border)
-              .clickable { year = y }
-              .padding(horizontal = 16.dp, vertical = 8.dp),
-            contentAlignment = Alignment.Center,
-          ) {
-            Text(
-              y.toString(),
-              style = MaterialTheme.typography.labelMedium,
-              color = if (selected) spec.onAccent else spec.ink,
-              fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
-            )
-          }
-        }
-      }
-
-      Box(Modifier.fillMaxWidth().height(1.dp).background(spec.border.copy(alpha = 0.4f)))
-
-      // ----------------------------------------------------------------- MONTH
-      Text("MONTH", style = MaterialTheme.typography.labelSmall, color = spec.muted)
-      monthNames.chunked(4).forEach { row ->
-        Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth()) {
-          row.forEach { name ->
-            val monthValue = monthNames.indexOf(name) + 1
-            val selected = year == current.year && monthValue == current.monthValue
-            Box(
-              Modifier
-                .weight(1f)
-                .aspectRatio(1.6f)
-                .background(if (selected) spec.accent else spec.surfaceAlt)
-                .border(1.dp, if (selected) spec.accent else spec.border)
-                .clickable { onSelect(YearMonth.of(year, monthValue)) },
-              contentAlignment = Alignment.Center,
-            ) {
-              Text(
-                name,
-                style = MaterialTheme.typography.labelMedium,
-                color = if (selected) spec.onAccent else spec.ink,
-                fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
-              )
-            }
-          }
-        }
-      }
-    }
-  }
-}
-
-@Composable
 private fun MonthArrow(label: String, onClick: () -> Unit, enabled: Boolean = true) {
   val spec = LocalThemeSpec.current
   Box(
@@ -478,44 +393,58 @@ private fun ActivityBlock(activity: MonthlyActivity) {
 
     val hasIncome = activity.incomeMinor > 0
     val hasExpense = activity.expenseMinor > 0
+    val total = activity.incomeMinor + activity.expenseMinor
     val incomeFraction =
       if (hasIncome && hasExpense) {
-        activity.incomeMinor.toFloat() / (activity.incomeMinor + activity.expenseMinor)
+        activity.incomeMinor.toFloat() / total
       } else {
         0f
       }
-    val animatedFraction by animateFloatAsState(
-      targetValue = incomeFraction,
-      animationSpec = tween(500),
-      label = "incomeFraction",
-    )
+    val expensePct = if (hasExpense && hasIncome) ((1f - incomeFraction) * 100).roundToInt() else if (hasExpense) 100 else 0
+    val incomePct = 100 - expensePct
 
-    // No zero-width slivers: a side with no activity gets no strip at all.
-    Row(Modifier.fillMaxWidth().height(14.dp)) {
-      when {
-        hasIncome && hasExpense -> {
-          Box(Modifier.weight(animatedFraction).fillMaxSize().background(spec.income))
-          Box(Modifier.weight(1f - animatedFraction).fillMaxSize().background(spec.expense))
+    Row(verticalAlignment = Alignment.CenterVertically) {
+      Row(Modifier.weight(1f).height(20.dp)) {
+        if (hasExpense) {
+          val expenseFraction = if (hasIncome) 1f - incomeFraction else 1f
+          Box(
+            Modifier
+              .fillMaxHeight()
+              .weight(expenseFraction)
+              .background(spec.expense)
+              .padding(horizontal = 4.dp),
+            contentAlignment = Alignment.CenterStart,
+          ) {
+            if (expenseFraction > 0.12f) {
+              Text("$expensePct%", style = MaterialTheme.typography.labelMedium, color = darkerForBar(spec.expense))
+            }
+          }
         }
-        hasIncome -> Box(Modifier.weight(1f).fillMaxSize().background(spec.income))
-        hasExpense -> Box(Modifier.weight(1f).fillMaxSize().background(spec.expense))
-        else -> Box(Modifier.weight(1f).fillMaxSize().background(spec.border.copy(alpha = 0.45f)))
+        if (hasIncome) {
+          val incomeShare = if (hasExpense) incomeFraction else 1f
+          Box(
+            Modifier
+              .fillMaxHeight()
+              .weight(incomeShare)
+              .background(spec.income)
+              .padding(horizontal = 4.dp),
+            contentAlignment = Alignment.CenterEnd,
+          ) {
+            if (incomeShare > 0.12f) {
+              Text("$incomePct%", style = MaterialTheme.typography.labelMedium, color = darkerForBar(spec.income))
+            }
+          }
+        }
       }
-    }
-
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-      if (hasIncome) {
+      Spacer(Modifier.width(12.dp))
+      Column(horizontalAlignment = Alignment.End) {
         Text(
-          "+${Money.format(activity.incomeMinor, activity.currency.symbol)}",
+          "+ ${Money.format(activity.incomeMinor, activity.currency.symbol)}",
           style = MaterialTheme.typography.labelMedium,
           color = spec.income,
         )
-      } else {
-        Spacer(Modifier.width(1.dp))
-      }
-      if (hasExpense) {
         Text(
-          "-${Money.format(activity.expenseMinor, activity.currency.symbol)}",
+          "- ${Money.format(activity.expenseMinor, activity.currency.symbol)}",
           style = MaterialTheme.typography.labelMedium,
           color = spec.expense,
         )
@@ -524,40 +453,30 @@ private fun ActivityBlock(activity: MonthlyActivity) {
   }
 }
 
-// ---------------------------------------------------------------------------
-// 3. Recent — list with hairline separators
-// ---------------------------------------------------------------------------
-
 @Composable
 private fun RecentSection(
   recent: List<TransactionListItem>,
   onEdit: (String) -> Unit,
   onSeeAll: () -> Unit,
 ) {
-  val spec = LocalThemeSpec.current
-  Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-    Row(
-      Modifier.fillMaxWidth(),
-      horizontalArrangement = Arrangement.SpaceBetween,
-      verticalAlignment = Alignment.CenterVertically,
-    ) {
-      SectionLabel("RECENT")
+  Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+    recent.forEachIndexed { index, item ->
+      TransactionRow(item = item, onPress = { onEdit(item.transaction.id) })
+      if (index < recent.lastIndex) DashedDivider()
     }
-    if (recent.isEmpty()) {
-      EmptyState(message = "No transactions yet. Tap + Add to create one.")
-    } else {
-      Column {
-        recent.take(5).forEachIndexed { index, item ->
-          TransactionRow(item = item, onPress = { onEdit(item.transaction.id) })
-          if (index < recent.take(5).lastIndex) DashedDivider()
-        }
-      }
-      BrButton(
-        text = "VIEW MORE",
-        onClick = onSeeAll,
-        style = BrButtonStyle.OUTLINE,
-        modifier = Modifier.fillMaxWidth(),
-      )
-    }
+    BrButton(
+      text = "VIEW MORE",
+      onClick = onSeeAll,
+      style = BrButtonStyle.OUTLINE,
+      modifier = Modifier.fillMaxWidth(),
+    )
   }
 }
+
+/** Darker variant of a bar color, for the percentage text drawn inside it. */
+private fun darkerForBar(color: androidx.compose.ui.graphics.Color): androidx.compose.ui.graphics.Color {
+  val hsv = FloatArray(3)
+  android.graphics.Color.colorToHSV(color.toArgb(), hsv)
+  return androidx.compose.ui.graphics.Color.hsv(hsv[0], hsv[1], hsv[2] * 0.5f)
+}
+

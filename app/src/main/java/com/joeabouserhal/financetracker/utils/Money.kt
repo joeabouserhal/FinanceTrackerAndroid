@@ -8,6 +8,13 @@ import java.util.Locale
 object Money {
   private val formatter = NumberFormat.getIntegerInstance(Locale.US)
 
+  /**
+   * Normalizes user-typed amounts for BigDecimal parsing: "12,50" becomes
+   * "12.50". (Grouped US-style input like "1,234.56" is not handled — it
+   * will fail validation, which is acceptable and surfaced as an error.)
+   */
+  fun normalizeDecimalInput(raw: String): String = raw.trim().replace(',', '.')
+
   /** Format minor units (cents) with the currency symbol, e.g. 123456 -> "$1,234.56". */
   fun format(minor: Long, symbol: String, forceDecimals: Boolean = false): String {
     val sign = if (minor < 0) "-" else ""

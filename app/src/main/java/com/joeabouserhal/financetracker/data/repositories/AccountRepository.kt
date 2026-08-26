@@ -51,17 +51,19 @@ class AccountRepository(
       val target = dao.getById(ownerId, id)
       val now = java.time.Instant.now().toString()
       dao.update(ownerId, id, name.trim(), currencyId, now)
-      // Keep the one-default-per-currency invariant when moving currencies.
+      // Keep the one-default-per-currency invariant when moving currencies,
+      // and enqueue ONLY the rows that actually changed.
+      val changedIds = mutableSetOf(id)
       if (target != null && target.currencyId != currencyId) {
         if (target.isDefault) {
-          promoteFirstActive(ownerId, target.currencyId, exceptId = target.id)
+          promoteFirstActive(ownerId, target.currencyId, exceptId = target.id)?.let { changedIds.add(it) }
         }
         val targetCurrencyHasDefault = dao.getAll(ownerId).any { it.currencyId == currencyId && !it.archived && it.isDefault }
         if (!targetCurrencyHasDefault) {
           dao.setDefault(ownerId, id, now)
         }
       }
-      enqueueChanged(ownerId, dao.getAll(ownerId).filter { it.id == id || it.currencyId == target?.currencyId || it.currencyId == currencyId })
+      enqueueChanged(ownerId, dao.getAll(ownerId).filter { it.id in changedIds })
     }
   }
 
@@ -124,11 +126,12 @@ class AccountRepository(
     dao.getAll(ownerId).any { it.id != target.id && it.currencyId == target.currencyId && !it.archived }
 
   /** Promote the first remaining active account of a currency to default. */
-  private suspend fun promoteFirstActive(ownerId: String, currencyId: String, exceptId: String) {
+  private suspend fun promoteFirstActive(ownerId: String, currencyId: String, exceptId: String): String? {
     val candidate = dao.getAll(ownerId).firstOrNull { it.id != exceptId && it.currencyId == currencyId && !it.archived }
     if (candidate != null) {
       dao.setDefault(ownerId, candidate.id, java.time.Instant.now().toString())
     }
+    return candidate?.id
   }
 
   /** Push UPDATE ops for every changed row so remote defaults stay in sync. */

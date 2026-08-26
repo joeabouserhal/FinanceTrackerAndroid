@@ -81,6 +81,9 @@ class TransactionRepository(
     require(amount > 0) { "Amount must be positive" }
     require(currencyId.isNotBlank()) { "Currency is required" }
     val resolvedCategoryId = categoryId?.takeIf { it.isNotBlank() } ?: resolveOther(ownerId, type)
+    // Manual edits don't clear the "created from preset" lineage: only an
+    // explicit presetId wins over the existing one.
+    val existing = dao.getById(ownerId, id)
     db.withTransaction {
       dao.update(
         ownerId = ownerId,
@@ -93,7 +96,7 @@ class TransactionRepository(
         date = date?.takeIf { it.isNotBlank() } ?: LocalDate.now().toString(),
         title = title?.takeIf { it.isNotBlank() },
         notes = notes?.takeIf { it.isNotBlank() },
-        presetId = presetId?.takeIf { it.isNotBlank() },
+        presetId = presetId?.takeIf { it.isNotBlank() } ?: existing?.presetId,
         updatedAt = java.time.Instant.now().toString(),
       )
       dao.getById(ownerId, id)?.let { full ->

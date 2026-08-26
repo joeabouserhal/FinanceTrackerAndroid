@@ -24,6 +24,7 @@ sealed interface SyncOutcome {
     val pushed: Int,
     val pulled: Int,
     val failedOps: Int,
+    val deadOps: Int,
     val pullFailed: Boolean,
   ) : SyncOutcome {
     val isClean: Boolean get() = failedOps == 0 && !pullFailed
@@ -50,7 +51,13 @@ class SyncEngine(
 
   companion object {
     private const val TAG = "SyncEngine"
+
+    /** Permanently failing ops stop being retried after this many attempts. */
+    const val MAX_PUSH_ATTEMPTS = 10
   }
+
+  /** Last completed sync outcome — surfaced in Options as sync health. */
+  val latestOutcome = kotlinx.coroutines.flow.MutableStateFlow<SyncOutcome.Completed?>(null)
 
   suspend fun sync(): SyncOutcome {
     val current = session.first()
@@ -60,8 +67,16 @@ class SyncEngine(
 
     var pushed = 0
     var failedOps = 0
+    var deadOps = 0
     for (spec in SyncTables.ALL) {
       for (op in db.outboxDao().getAllForOwnerAndTable(current.ownerId, spec.name)) {
+        if (op.attempts >= MAX_PUSH_ATTEMPTS) {
+          // Permanently failing op (bad FK, server-side rejection, …): keep
+          // it locally so no data is lost, but stop retrying it forever.
+          deadOps++
+          Log.w(TAG, "op ${op.id} (${spec.name}/${op.action}) given up after ${op.attempts} attempts — kept locally")
+          continue
+        }
         try {
           pushOp(syncApi, op, spec)
           db.outboxDao().deleteById(op.id)
@@ -85,8 +100,8 @@ class SyncEngine(
       }
     }
 
-    Log.i(TAG, "sync done: pushed=$pushed pulled=$pulled failedOps=$failedOps pullFailed=$pullFailed")
-    return SyncOutcome.Completed(pushed, pulled, failedOps, pullFailed)
+    Log.i(TAG, "sync done: pushed=$pushed pulled=$pulled failedOps=$failedOps deadOps=$deadOps pullFailed=$pullFailed")
+    return SyncOutcome.Completed(pushed, pulled, failedOps, deadOps, pullFailed).also { latestOutcome.value = it }
   }
 
   private suspend fun pushOp(api: SyncApi, op: OutboxEntity, spec: SyncTables.Spec) {

@@ -43,6 +43,7 @@ import com.joeabouserhal.financetracker.ui.components.BrDialog
 import com.joeabouserhal.financetracker.ui.components.BrTextField
 import com.joeabouserhal.financetracker.ui.rememberAppContainer
 import com.joeabouserhal.financetracker.utils.Dates
+import com.joeabouserhal.financetracker.utils.parseHexColor
 import java.time.Instant
 import java.time.LocalDate
 import java.time.YearMonth
@@ -385,5 +386,4 @@ private fun ChipRow(label: String, content: @Composable () -> Unit) {
 
 private fun toggle(set: Set<String>, id: String): Set<String> = if (id in set) set - id else set + id
 
-fun parseCategoryColor(hex: String): Color =
-  try { Color(android.graphics.Color.parseColor(hex)) } catch (_: IllegalArgumentException) { Color(0xFF77746C) }
+fun parseCategoryColor(hex: String): Color = parseHexColor(hex)

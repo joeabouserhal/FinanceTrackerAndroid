@@ -64,6 +64,12 @@ fun OptionsScreen(
   var error by remember { mutableStateOf<String?>(null) }
   var showSignOutConfirm by remember { mutableStateOf(false) }
 
+  // Sync health: pending outbox ops + the last completed engine outcome.
+  val pendingOps by remember(session.ownerId) {
+    container.appDatabase.outboxDao().observeCountForOwner(session.ownerId)
+  }.collectAsStateWithLifecycle(initialValue = 0)
+  val lastOutcome by container.syncEngine.latestOutcome.collectAsStateWithLifecycle(initialValue = null)
+
   // Sync the draft with the owner's profile whenever the partition OR the
   // loaded profile changes — but only when the profile belongs to the current
   // owner (the guest profile briefly emits before the real session arrives).
@@ -142,6 +148,29 @@ fun OptionsScreen(
           style = BrButtonStyle.OUTLINE,
           modifier = Modifier.fillMaxWidth(),
         )
+        if (pendingOps > 0) {
+          Text(
+            "$pendingOps change${if (pendingOps == 1) "" else "s"} waiting to sync",
+            style = MaterialTheme.typography.labelSmall,
+            color = spec.muted,
+          )
+        }
+        lastOutcome?.let { outcome ->
+          when {
+            outcome.deadOps > 0 ->
+              Text(
+                "${outcome.deadOps} change${if (outcome.deadOps == 1) "" else "s"} couldn't sync — kept on this device",
+                style = MaterialTheme.typography.labelSmall,
+                color = spec.expense,
+              )
+            outcome.failedOps > 0 || outcome.pullFailed ->
+              Text(
+                "Last sync hit a problem — it will retry automatically",
+                style = MaterialTheme.typography.labelSmall,
+                color = spec.expense,
+              )
+          }
+        }
       }
 
       // ------------------------------------------------------------------ ACCOUNT

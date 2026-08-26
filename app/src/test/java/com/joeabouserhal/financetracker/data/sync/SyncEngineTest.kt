@@ -296,4 +296,29 @@ class SyncEngineTest {
     // Failed table's watermark must not advance.
     assertEquals(null, db.syncMetaDao().get(USER_ID, "accounts"))
   }
+
+  @Test
+  fun `permanently failing op is given up after the attempt cap and no longer blocks retries`() = runTest {
+    val api = FakeSyncApi().apply { failUpsertFor = "transactions" }
+    val opId =
+      db.outboxDao().insert(OutboxWriter.newOp(USER_ID, "transactions", OutboxAction.INSERT, buildJsonObject { put("id", "tx-1"); put("user_id", USER_ID) }))
+    db.outboxDao().updateAttempts(opId, SyncEngine.MAX_PUSH_ATTEMPTS)
+
+    val outcome = engine(api).sync() as SyncOutcome.Completed
+
+    // Dead op: counted, kept locally, but the run is clean (worker won't retry).
+    assertEquals(1, outcome.deadOps)
+    assertEquals(0, outcome.failedOps)
+    assertTrue(outcome.isClean)
+    assertEquals(1, db.outboxDao().getAllForOwner(USER_ID).size)
+
+    // A later successful op still flows through.
+    api.failUpsertFor = null
+    db.outboxDao().insert(OutboxWriter.newOp(USER_ID, "currencies", OutboxAction.INSERT, currencyPayload("cur-9", "USD")))
+    val second = engine(api).sync() as SyncOutcome.Completed
+    assertEquals(0, second.failedOps)
+    assertEquals(1, second.pushed)
+    assertEquals("cur-9", (api.pushed.last().second["id"] as JsonPrimitive).contentOrNull)
+    assertEquals(1, db.outboxDao().getAllForOwner(USER_ID).size) // only the dead op remains
+  }
 }

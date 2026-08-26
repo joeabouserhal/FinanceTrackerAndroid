@@ -68,14 +68,16 @@ class DashboardRepository(
   ): DashboardData {
     val currencyById = currencies.associateBy { it.id }
 
-    // Per-account all-time net (account balances are individual, per requirement).
+    // Single-pass per-account all-time nets (was O(accounts × transactions)
+    // of full-list filters before this phase).
+    val netByAccount = HashMap<String, Long>()
+    for (t in allTransactions) {
+      t.accountId?.let { accountId -> netByAccount[accountId] = (netByAccount[accountId] ?: 0L) + signed(t) }
+    }
     val accountBalances =
       accounts.mapNotNull { account ->
         val currency = currencyById[account.currencyId] ?: return@mapNotNull null
-        val net = allTransactions
-          .filter { it.accountId == account.id }
-          .sumOf { signed(it) }
-        AccountBalance(account, currency, net)
+        AccountBalance(account, currency, netByAccount[account.id] ?: 0L)
       }
 
     val balances =
@@ -85,10 +87,17 @@ class DashboardRepository(
       }
         .sortedBy { if (it.currency.isDefault) 0 else 1 }
 
+    // Single-pass per-currency monthly activity.
+    val incomeByCurrency = HashMap<String, Long>()
+    val expenseByCurrency = HashMap<String, Long>()
+    for (t in monthTransactions) {
+      val map = if (t.type == TransactionType.INCOME) incomeByCurrency else expenseByCurrency
+      map[t.currencyId] = (map[t.currencyId] ?: 0L) + t.amount
+    }
     val monthly =
       currencies.mapNotNull { currency ->
-        val income = monthTransactions.filter { it.currencyId == currency.id && it.type == TransactionType.INCOME }.sumOf { it.amount }
-        val expense = monthTransactions.filter { it.currencyId == currency.id && it.type == TransactionType.EXPENSE }.sumOf { it.amount }
+        val income = incomeByCurrency[currency.id] ?: 0L
+        val expense = expenseByCurrency[currency.id] ?: 0L
         if (income == 0L && expense == 0L) null else MonthlyActivity(currency, income, expense)
       }
         .sortedBy { if (it.currency.isDefault) 0 else 1 }

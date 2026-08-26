@@ -54,6 +54,7 @@ import com.joeabouserhal.financetracker.ui.components.BrTextField
 import com.joeabouserhal.financetracker.ui.components.ThousandsSeparatorTransformation
 import com.joeabouserhal.financetracker.ui.rememberAppContainer
 import com.joeabouserhal.financetracker.utils.Dates
+import com.joeabouserhal.financetracker.utils.Money
 import java.math.BigDecimal
 import java.math.RoundingMode
 import java.time.Instant
@@ -180,7 +181,7 @@ fun TransactionFormScreen(
 
   fun save() {
     val amountMinor = try {
-      BigDecimal(amountText.trim()).setScale(2, RoundingMode.HALF_UP).movePointRight(2).longValueExact()
+      BigDecimal(Money.normalizeDecimalInput(amountText)).setScale(2, RoundingMode.HALF_UP).movePointRight(2).longValueExact()
     } catch (_: Exception) {
       error = "Enter a valid amount"
       return

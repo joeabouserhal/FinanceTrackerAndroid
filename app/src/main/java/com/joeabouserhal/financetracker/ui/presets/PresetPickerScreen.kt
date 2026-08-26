@@ -95,33 +95,13 @@ fun PresetPickerScreen(
       }
 
       presets.forEach { preset ->
-        val currency = currencies.firstOrNull { it.id == preset.defaultCurrencyId }
-        val account = accounts.firstOrNull { it.id == preset.defaultAccountId }
-        val category = categories.firstOrNull { it.id == preset.defaultCategoryId }
-        val summary = listOfNotNull(category?.name, account?.name).joinToString(" · ")
-
-        Row(
-          Modifier
-            .fillMaxWidth()
-            .background(spec.surface)
-            .clickable(onClick = { onPick(preset.id) })
-            .padding(horizontal = 12.dp, vertical = 10.dp),
-          verticalAlignment = Alignment.CenterVertically,
-        ) {
-          Column(Modifier.weight(1f)) {
-            Text(preset.name, style = MaterialTheme.typography.bodyMedium, color = spec.ink)
-            if (summary.isNotBlank()) {
-              Text(summary, style = MaterialTheme.typography.labelSmall, color = spec.muted)
-            }
-          }
-          preset.defaultAmount?.let { amount ->
-            Text(
-              Money.format(amount, currency?.symbol ?: ""),
-              style = MaterialTheme.typography.bodyMedium,
-              color = if (preset.type == TransactionType.EXPENSE) spec.expense else spec.income,
-            )
-          }
-        }
+        PresetRowView(
+          preset = preset,
+          currencies = currencies,
+          accounts = accounts,
+          categories = categories.filter { it.type == preset.type },
+          onTap = { onPick(preset.id) },
+        )
       }
     }
   }
