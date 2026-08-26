@@ -278,6 +278,7 @@ private fun PresetDialog(
           BrChip(
             c.code,
             selected = currencyId == c.id,
+            large = true,
             onClick = {
               currencyId = c.id
               val forCurrency = accounts.filter { it.currencyId == c.id }
@@ -288,7 +289,7 @@ private fun PresetDialog(
       }
       Text("ACCOUNT", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
       Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-        accounts.filter { it.currencyId == currencyId }.forEach { a -> BrChip(a.name, selected = accountId == a.id, onClick = { accountId = a.id }) }
+        accounts.filter { it.currencyId == currencyId }.forEach { a -> BrChip(a.name, selected = accountId == a.id, large = true, onClick = { accountId = a.id }) }
       }
       Text("CATEGORY", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
       Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.horizontalScroll(rememberScrollState())) {

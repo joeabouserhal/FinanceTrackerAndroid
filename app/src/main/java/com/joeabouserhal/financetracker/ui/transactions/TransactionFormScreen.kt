@@ -1,5 +1,6 @@
 package com.joeabouserhal.financetracker.ui.transactions
 
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -7,6 +8,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
@@ -14,9 +16,11 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
@@ -38,6 +42,9 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
@@ -295,6 +302,7 @@ fun TransactionFormScreen(
           BrChip(
             currency.code,
             selected = selectedCurrencyId == currency.id,
+            large = true,
             onClick = {
               selectedCurrencyId = currency.id
               val forCurrency = accounts.filter { it.currencyId == currency.id }
@@ -310,7 +318,7 @@ fun TransactionFormScreen(
       } else {
         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
           accountOptions.forEach { account ->
-            BrChip(account.name, selected = selectedAccountId == account.id, onClick = { selectedAccountId = account.id })
+            BrChip(account.name, selected = selectedAccountId == account.id, large = true, onClick = { selectedAccountId = account.id })
           }
         }
       }
@@ -414,28 +422,54 @@ fun TransactionFormScreen(
         if (filtered.isEmpty()) {
           Text("No categories match", style = MaterialTheme.typography.labelSmall, color = spec.muted)
         } else {
-          LazyColumn(Modifier.fillMaxWidth().heightIn(max = 320.dp)) {
-            items(filtered, key = { it.id }) { category ->
-              Row(
-                Modifier
-                  .fillMaxWidth()
-                  .clickable {
-                    selectedCategoryId = category.id
-                    showCategoryModal = false
-                  }
-                  .padding(vertical = 10.dp),
-                verticalAlignment = Alignment.CenterVertically,
-              ) {
-                Box(
+          val listState = rememberLazyListState()
+          Box(Modifier.fillMaxWidth().heightIn(max = 480.dp)) {
+            LazyColumn(Modifier.fillMaxWidth(), state = listState) {
+              items(filtered, key = { it.id }) { category ->
+                Row(
                   Modifier
-                    .size(14.dp)
-                    .background(parseCategoryColor(category.color)),
-                )
-                Text(
-                  category.name,
-                  style = MaterialTheme.typography.bodyMedium,
-                  color = if (selectedCategoryId == category.id) spec.accent else spec.ink,
-                  modifier = Modifier.padding(horizontal = 12.dp),
+                    .fillMaxWidth()
+                    .clickable {
+                      selectedCategoryId = category.id
+                      showCategoryModal = false
+                    }
+                    .padding(vertical = 10.dp),
+                  verticalAlignment = Alignment.CenterVertically,
+                ) {
+                  Box(
+                    Modifier
+                      .size(14.dp)
+                      .background(parseCategoryColor(category.color)),
+                  )
+                  Text(
+                    category.name,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = if (selectedCategoryId == category.id) spec.accent else spec.ink,
+                    modifier = Modifier.padding(horizontal = 12.dp),
+                  )
+                }
+              }
+            }
+            // Thin scroll indicator on the right edge — only when scrollable.
+            val info = listState.layoutInfo
+            val scrollable = listState.canScrollForward || listState.canScrollBackward
+            if (scrollable && info.totalItemsCount > 0 && info.visibleItemsInfo.isNotEmpty()) {
+              Canvas(
+                Modifier
+                  .align(Alignment.CenterEnd)
+                  .fillMaxHeight()
+                  .width(4.dp),
+              ) {
+                val first = info.visibleItemsInfo.first()
+                val last = info.visibleItemsInfo.last()
+                val topFraction = first.index.toFloat() / info.totalItemsCount
+                val bottomFraction = (last.index + 1).toFloat() / info.totalItemsCount
+                val thumbFraction = (bottomFraction - topFraction).coerceAtLeast(0.06f)
+                drawRoundRect(
+                  color = spec.border.copy(alpha = 0.8f),
+                  topLeft = Offset(0f, topFraction * size.height),
+                  size = Size(size.width, thumbFraction * size.height),
+                  cornerRadius = CornerRadius(2.dp.toPx()),
                 )
               }
             }

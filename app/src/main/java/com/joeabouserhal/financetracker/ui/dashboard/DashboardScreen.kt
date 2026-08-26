@@ -404,50 +404,52 @@ private fun ActivityBlock(activity: MonthlyActivity) {
     val incomePct = 100 - expensePct
 
     Row(verticalAlignment = Alignment.CenterVertically) {
-      Row(Modifier.weight(1f).height(20.dp)) {
-        if (hasExpense) {
-          val expenseFraction = if (hasIncome) 1f - incomeFraction else 1f
-          Box(
-            Modifier
-              .fillMaxHeight()
-              .weight(expenseFraction)
-              .background(spec.expense)
-              .padding(horizontal = 4.dp),
-            contentAlignment = Alignment.CenterStart,
-          ) {
-            if (expenseFraction > 0.12f) {
-              Text("$expensePct%", style = MaterialTheme.typography.labelMedium, color = darkerForBar(spec.expense))
+      Column(Modifier.weight(1f)) {
+        Row(Modifier.fillMaxWidth().height(20.dp)) {
+          if (hasExpense) {
+            val expenseFraction = if (hasIncome) 1f - incomeFraction else 1f
+            Box(
+              Modifier
+                .fillMaxHeight()
+                .weight(expenseFraction)
+                .background(spec.expense)
+                .padding(horizontal = 4.dp),
+              contentAlignment = Alignment.CenterStart,
+            ) {
+              if (expenseFraction > 0.12f) {
+                Text("$expensePct%", style = MaterialTheme.typography.labelMedium, color = darkerForBar(spec.expense))
+              }
+            }
+          }
+          if (hasIncome) {
+            val incomeShare = if (hasExpense) incomeFraction else 1f
+            Box(
+              Modifier
+                .fillMaxHeight()
+                .weight(incomeShare)
+                .background(spec.income)
+                .padding(horizontal = 4.dp),
+              contentAlignment = Alignment.CenterEnd,
+            ) {
+              if (incomeShare > 0.12f) {
+                Text("$incomePct%", style = MaterialTheme.typography.labelMedium, color = darkerForBar(spec.income))
+              }
             }
           }
         }
-        if (hasIncome) {
-          val incomeShare = if (hasExpense) incomeFraction else 1f
-          Box(
-            Modifier
-              .fillMaxHeight()
-              .weight(incomeShare)
-              .background(spec.income)
-              .padding(horizontal = 4.dp),
-            contentAlignment = Alignment.CenterEnd,
-          ) {
-            if (incomeShare > 0.12f) {
-              Text("$incomePct%", style = MaterialTheme.typography.labelMedium, color = darkerForBar(spec.income))
-            }
-          }
+        Spacer(Modifier.height(4.dp))
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+          Text(
+            "- ${Money.format(activity.expenseMinor, activity.currency.symbol)}",
+            style = MaterialTheme.typography.labelMedium,
+            color = spec.expense,
+          )
+          Text(
+            "+ ${Money.format(activity.incomeMinor, activity.currency.symbol)}",
+            style = MaterialTheme.typography.labelMedium,
+            color = spec.income,
+          )
         }
-      }
-      Spacer(Modifier.width(12.dp))
-      Column(horizontalAlignment = Alignment.End) {
-        Text(
-          "+ ${Money.format(activity.incomeMinor, activity.currency.symbol)}",
-          style = MaterialTheme.typography.labelMedium,
-          color = spec.income,
-        )
-        Text(
-          "- ${Money.format(activity.expenseMinor, activity.currency.symbol)}",
-          style = MaterialTheme.typography.labelMedium,
-          color = spec.expense,
-        )
       }
     }
   }

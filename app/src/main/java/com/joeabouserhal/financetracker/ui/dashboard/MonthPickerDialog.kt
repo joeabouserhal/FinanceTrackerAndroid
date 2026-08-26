@@ -90,19 +90,38 @@ fun MonthPickerDialog(
           row.forEach { name ->
             val monthValue = monthNames.indexOf(name) + 1
             val selected = year == current.year && monthValue == current.monthValue
+            val enabled = year < current.year || (year == current.year && monthValue <= current.monthValue)
             Box(
               Modifier
                 .weight(1f)
                 .aspectRatio(1.6f)
-                .background(if (selected) spec.accent else spec.surfaceAlt)
-                .border(1.dp, if (selected) spec.accent else spec.border)
-                .clickable { onSelect(YearMonth.of(year, monthValue)) },
+                .background(
+                  when {
+                    selected -> spec.accent
+                    enabled -> spec.surfaceAlt
+                    else -> spec.surfaceAlt.copy(alpha = 0.5f)
+                  }
+                )
+                .border(
+                  1.dp,
+                  when {
+                    selected -> spec.accent
+                    enabled -> spec.border
+                    else -> spec.border.copy(alpha = 0.35f)
+                  },
+                )
+                .clickable(enabled = enabled) { onSelect(YearMonth.of(year, monthValue)) },
               contentAlignment = Alignment.Center,
             ) {
               Text(
                 name,
                 style = MaterialTheme.typography.labelMedium,
-                color = if (selected) spec.onAccent else spec.ink,
+                color =
+                  when {
+                    selected -> spec.onAccent
+                    enabled -> spec.ink
+                    else -> spec.muted.copy(alpha = 0.4f)
+                  },
                 fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
               )
             }

@@ -151,6 +151,56 @@ fun FilterPanel(
       Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
       verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
+      // Currency: ALL by default; tapping a currency selects it, tapping it
+      // again returns to ALL.
+      ChipRow("CURRENCY") {
+        BrChip(
+          "ALL",
+          selected = filters.currencyIds.isEmpty(),
+          large = true,
+          onClick = { onFiltersChange(filters.copy(currencyIds = emptySet())) },
+        )
+        currencies.forEach { c ->
+          val selected = c.id in filters.currencyIds
+          BrChip(
+            c.code,
+            selected = selected,
+            large = true,
+            onClick = {
+              val newIds = if (selected) emptySet() else setOf(c.id)
+              val newVisible = accounts.filter { newIds.isEmpty() || it.currencyId in newIds }
+              onFiltersChange(
+                filters.copy(
+                  currencyIds = newIds,
+                  accountIds = filters.accountIds.intersect(newVisible.map { it.id }.toSet()),
+                ),
+              )
+            },
+          )
+        }
+      }
+      // Account: ALL shows every account of the selected currency, CUSTOM opens
+      // a search modal, then every account is shown in the slider. Same-named
+      // accounts get their currency code appended, e.g. "Cash (LBP)".
+      ChipRow("ACCOUNT · ${selectedCurrency?.code ?: "ALL"}") {
+        BrChip("ALL", selected = filters.accountIds.isEmpty(), large = true, onClick = { onFiltersChange(filters.copy(accountIds = emptySet())) })
+        BrChip("CUSTOM", selected = filters.accountIds.isNotEmpty(), large = true, onClick = { showAccountModal = true })
+        val duplicateNames = visibleAccounts.groupingBy { it.name }.eachCount().filterValues { it > 1 }.keys
+        if (visibleAccounts.isEmpty()) {
+          Text("No accounts for this currency", style = MaterialTheme.typography.labelSmall, color = spec.muted)
+        } else {
+          visibleAccounts.forEach { a ->
+            val suffix = if (a.name in duplicateNames) currencies.firstOrNull { it.id == a.currencyId }?.code else null
+            BrChip(
+              a.name,
+              suffix = suffix,
+              selected = a.id in filters.accountIds,
+              large = true,
+              onClick = { onFiltersChange(filters.copy(accountIds = toggle(filters.accountIds, a.id))) },
+            )
+          }
+        }
+      }
       // Type
       if (showTypeRow) {
         ChipRow("TYPE") {
@@ -193,49 +243,6 @@ fun FilterPanel(
             colorDot = parseCategoryColor(c.color),
             onClick = { onFiltersChange(filters.copy(categoryIds = toggle(filters.categoryIds, c.id))) },
           )
-        }
-      }
-      // Currency: ALL by default; tapping a currency selects it, tapping it
-      // again returns to ALL.
-      ChipRow("CURRENCY") {
-        BrChip(
-          "ALL",
-          selected = filters.currencyIds.isEmpty(),
-          onClick = { onFiltersChange(filters.copy(currencyIds = emptySet())) },
-        )
-        currencies.forEach { c ->
-          val selected = c.id in filters.currencyIds
-          BrChip(
-            c.code,
-            selected = selected,
-            onClick = {
-              val newIds = if (selected) emptySet() else setOf(c.id)
-              val newVisible = accounts.filter { newIds.isEmpty() || it.currencyId in newIds }
-              onFiltersChange(
-                filters.copy(
-                  currencyIds = newIds,
-                  accountIds = filters.accountIds.intersect(newVisible.map { it.id }.toSet()),
-                ),
-              )
-            },
-          )
-        }
-      }
-      // Account: ALL shows every account of the selected currency, CUSTOM opens
-      // a search modal, then every account is shown in the slider.
-      ChipRow("ACCOUNT · ${selectedCurrency?.code ?: "ALL"}") {
-        BrChip("ALL", selected = filters.accountIds.isEmpty(), onClick = { onFiltersChange(filters.copy(accountIds = emptySet())) })
-        BrChip("CUSTOM", selected = filters.accountIds.isNotEmpty(), onClick = { showAccountModal = true })
-        if (visibleAccounts.isEmpty()) {
-          Text("No accounts for this currency", style = MaterialTheme.typography.labelSmall, color = spec.muted)
-        } else {
-          visibleAccounts.forEach { a ->
-            BrChip(
-              a.name,
-              selected = a.id in filters.accountIds,
-              onClick = { onFiltersChange(filters.copy(accountIds = toggle(filters.accountIds, a.id))) },
-            )
-          }
         }
       }
       if (TransactionFiltering.activeCount(filters) > 0) {
@@ -348,10 +355,12 @@ fun FilterPanel(
           Modifier.heightIn(max = 320.dp).verticalScroll(rememberScrollState()),
           verticalArrangement = Arrangement.spacedBy(2.dp),
         ) {
+          val duplicateNames = visibleAccounts.groupingBy { it.name }.eachCount().filterValues { it > 1 }.keys
           visibleAccounts
             .filter { it.name.contains(accountSearch, ignoreCase = true) }
             .forEach { a ->
               val selected = a.id in filters.accountIds
+              val suffix = if (a.name in duplicateNames) currencies.firstOrNull { it.id == a.currencyId }?.code else null
               Row(
                 Modifier
                   .fillMaxWidth()
@@ -360,6 +369,14 @@ fun FilterPanel(
                 verticalAlignment = Alignment.CenterVertically,
               ) {
                 Text(a.name, style = MaterialTheme.typography.bodyMedium, color = spec.ink, modifier = Modifier.weight(1f))
+                if (suffix != null) {
+                  Text(
+                    "(${suffix.uppercase()})",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = spec.muted,
+                    modifier = Modifier.alignByBaseline(),
+                  )
+                }
                 Text(if (selected) "✓" else "", style = MaterialTheme.typography.labelLarge, color = spec.accent)
               }
             }
