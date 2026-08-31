@@ -150,9 +150,47 @@ class MigrationTest {
   }
 
   @Test
-  fun `fresh install DDL matches the exported schema`() {
+  fun `migrate 5 to 6 adds the goals table`() {
     val db = openVersion(5)
-    assertMatchesExportedSchema(db, 5)
+
+    Migrations.MIGRATION_5_6.migrate(db)
+
+    // Table exists and accepts a goal row.
+    db.execSQL(
+      "INSERT INTO goals (id, owner_id, name, target_minor, currency_id, account_id, created_at, updated_at) " +
+        "VALUES ('goal-1', 'user-1', 'Emergency fund', 100000, 'cur-1', NULL, '2026-08-01T10:00:00Z', '2026-08-01T10:00:00Z')",
+    )
+    db.query("SELECT name, target_minor FROM goals WHERE id = 'goal-1'").use { cursor ->
+      assertTrue(cursor.moveToFirst())
+      assertEquals("Emergency fund", cursor.getString(0))
+      assertEquals(100000L, cursor.getLong(1))
+    }
+    assertMatchesExportedSchema(db, 6)
+    db.close()
+  }
+
+  @Test
+  fun `migrate 6 to 7 adds the completed flag to goals`() {
+    val db = openVersion(6)
+    db.execSQL(
+      "INSERT INTO goals (id, owner_id, name, target_minor, currency_id, account_id, created_at, updated_at) " +
+        "VALUES ('goal-1', 'user-1', 'Emergency fund', 100000, 'cur-1', NULL, '2026-08-01T10:00:00Z', '2026-08-01T10:00:00Z')",
+    )
+
+    Migrations.MIGRATION_6_7.migrate(db)
+
+    db.query("SELECT completed FROM goals WHERE id = 'goal-1'").use { cursor ->
+      assertTrue(cursor.moveToFirst())
+      assertEquals(0, cursor.getInt(0))
+    }
+    assertMatchesExportedSchema(db, 7)
+    db.close()
+  }
+
+  @Test
+  fun `fresh install DDL matches the exported schema`() {
+    val db = openVersion(7)
+    assertMatchesExportedSchema(db, 7)
     db.close()
   }
 

@@ -3,6 +3,7 @@ package com.joeabouserhal.financetracker.data.sync
 import com.joeabouserhal.financetracker.data.local.entities.AccountEntity
 import com.joeabouserhal.financetracker.data.local.entities.CategoryEntity
 import com.joeabouserhal.financetracker.data.local.entities.CurrencyEntity
+import com.joeabouserhal.financetracker.data.local.entities.GoalEntity
 import com.joeabouserhal.financetracker.data.local.entities.PresetEntity
 import com.joeabouserhal.financetracker.data.local.entities.ProfileEntity
 import com.joeabouserhal.financetracker.data.local.entities.TransactionEntity
@@ -68,6 +69,19 @@ object SyncMappers {
       defaultCategoryId = row.optString("default_category_id"),
       defaultAccountId = row.optString("default_account_id"),
       archived = row.optBool("archived"),
+      createdAt = row.createdAt(),
+      updatedAt = row.reqString("updated_at"),
+    )
+
+  fun goal(row: JsonObject): GoalEntity =
+    GoalEntity(
+      id = row.reqString("id"),
+      ownerId = row.reqString("user_id"),
+      name = row.reqString("name"),
+      targetMinor = row.reqLong("target_minor"),
+      currencyId = row.reqString("currency_id"),
+      accountId = row.optString("account_id"),
+      completed = row.optBool("completed"),
       createdAt = row.createdAt(),
       updatedAt = row.reqString("updated_at"),
     )

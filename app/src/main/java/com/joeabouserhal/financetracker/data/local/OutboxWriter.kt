@@ -3,6 +3,7 @@ package com.joeabouserhal.financetracker.data.local
 import com.joeabouserhal.financetracker.data.local.entities.AccountEntity
 import com.joeabouserhal.financetracker.data.local.entities.CategoryEntity
 import com.joeabouserhal.financetracker.data.local.entities.CurrencyEntity
+import com.joeabouserhal.financetracker.data.local.entities.GoalEntity
 import com.joeabouserhal.financetracker.data.local.entities.OutboxAction
 import com.joeabouserhal.financetracker.data.local.entities.OutboxEntity
 import com.joeabouserhal.financetracker.data.local.entities.PresetEntity
@@ -78,6 +79,18 @@ object OutboxWriter {
         "name" to JsonPrimitive(e.name),
         "archived" to JsonPrimitive(e.archived),
         "is_default" to JsonPrimitive(e.isDefault),
+      ),
+    )
+
+  fun goal(ownerId: String, e: GoalEntity): JsonObject =
+    merge(
+      base(e.id, ownerId),
+      json(
+        "name" to JsonPrimitive(e.name),
+        "target_minor" to JsonPrimitive(e.targetMinor),
+        "currency_id" to JsonPrimitive(e.currencyId),
+        "account_id" to (e.accountId?.let { JsonPrimitive(it) } ?: JsonNull),
+        "completed" to JsonPrimitive(e.completed),
       ),
     )
 

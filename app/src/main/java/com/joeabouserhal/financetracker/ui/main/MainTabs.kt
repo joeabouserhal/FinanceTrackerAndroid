@@ -31,8 +31,8 @@ import com.joeabouserhal.financetracker.ui.components.BrDialog
 import com.joeabouserhal.financetracker.ui.components.BrutalistTabBar
 import com.joeabouserhal.financetracker.ui.components.TabItem
 import com.joeabouserhal.financetracker.ui.dashboard.DashboardScreen
-import com.joeabouserhal.financetracker.ui.presets.PresetFilter
-import com.joeabouserhal.financetracker.ui.presets.PresetsScreen
+import com.joeabouserhal.financetracker.ui.goals.CompletedGoalsScreen
+import com.joeabouserhal.financetracker.ui.goals.GoalsScreen
 import com.joeabouserhal.financetracker.ui.report.ReportScreen
 import com.joeabouserhal.financetracker.ui.settings.OptionsScreen
 import com.joeabouserhal.financetracker.ui.transactions.TransactionsScreen
@@ -40,7 +40,7 @@ import com.joeabouserhal.financetracker.ui.transactions.TransactionsScreen
 enum class MainTab(val label: String) {
   DASHBOARD("Dashboard"),
   TRANSACTIONS("Transactions"),
-  PRESETS("Presets"),
+  GOALS("Goals"),
   REPORT("Report"),
   OPTIONS("Options"),
 }
@@ -49,7 +49,7 @@ private val TAB_ITEMS =
   listOf(
     TabItem("Dashboard", R.drawable.ic_tab_dashboard),
     TabItem("Transactions", R.drawable.ic_tab_transactions),
-    TabItem("Presets", R.drawable.ic_tab_presets),
+    TabItem("Goals", R.drawable.ic_tab_goal),
     TabItem("Report", R.drawable.ic_tab_report),
     TabItem("Options", R.drawable.ic_tab_settings),
   )
@@ -66,6 +66,8 @@ fun MainTabs(
   onOpenCurrenciesAccounts: () -> Unit,
   onOpenThemes: () -> Unit,
   onOpenCategories: () -> Unit,
+  onOpenPresets: () -> Unit,
+  onOpenCompletedGoals: () -> Unit,
   onOpenAuth: () -> Unit,
   modifier: Modifier = Modifier,
 ) {
@@ -74,11 +76,6 @@ fun MainTabs(
   // Keeps each tab's rememberSaveable state (search, filters, scroll) alive
   // across tab switches — without this, switching tabs reset them all.
   val tabStateHolder = rememberSaveableStateHolder()
-
-  // Hoisted out of PresetsScreen: the tab's composition is disposed on every
-  // tab switch, so any state kept there (like the ALL/Expense/Income filter)
-  // would reset and make presets of the other type seem to "disappear".
-  var presetsFilter by rememberSaveable { mutableStateOf(PresetFilter.ALL) }
 
   Column(modifier.fillMaxSize()) {
     Box(
@@ -105,16 +102,13 @@ fun MainTabs(
               onAddFromPreset = onOpenPresetPicker,
               onEditTransaction = onEditTransaction,
             )
-            MainTab.PRESETS ->
-              PresetsScreen(
-                filter = presetsFilter,
-                onFilterChange = { presetsFilter = it },
-              )
+            MainTab.GOALS -> GoalsScreen(onOpenCompletedGoals = onOpenCompletedGoals)
             MainTab.REPORT -> ReportScreen()
             MainTab.OPTIONS -> OptionsScreen(
               onOpenCurrenciesAccounts = onOpenCurrenciesAccounts,
               onOpenThemes = onOpenThemes,
               onOpenCategories = onOpenCategories,
+              onOpenPresets = onOpenPresets,
               onSignIn = onOpenAuth,
             )
           }

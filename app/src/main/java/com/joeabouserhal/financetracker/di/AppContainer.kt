@@ -15,6 +15,7 @@ import com.joeabouserhal.financetracker.data.repositories.AccountRepository
 import com.joeabouserhal.financetracker.data.repositories.CategoryRepository
 import com.joeabouserhal.financetracker.data.repositories.CurrencyRepository
 import com.joeabouserhal.financetracker.data.repositories.DashboardRepository
+import com.joeabouserhal.financetracker.data.repositories.GoalRepository
 import com.joeabouserhal.financetracker.data.repositories.PresetRepository
 import com.joeabouserhal.financetracker.data.repositories.ProfileRepository
 import com.joeabouserhal.financetracker.data.repositories.TransactionRepository
@@ -61,6 +62,7 @@ class AppContainer(context: Context) {
     AccountRepository(appDatabase.accountDao(), appDatabase.transactionDao(), appDatabase)
   val categoryRepository: CategoryRepository = CategoryRepository(appDatabase.categoryDao(), appDatabase)
   val presetRepository: PresetRepository = PresetRepository(appDatabase.presetDao(), appDatabase)
+  val goalRepository: GoalRepository = GoalRepository(appDatabase.goalDao(), appDatabase)
   val transactionRepository: TransactionRepository =
     TransactionRepository(appDatabase.transactionDao(), appDatabase.categoryDao(), appDatabase)
   val profileRepository: ProfileRepository = ProfileRepository(appDatabase.profileDao(), appDatabase)

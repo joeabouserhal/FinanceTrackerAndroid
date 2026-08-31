@@ -38,6 +38,11 @@ fun BrButton(
   enabled: Boolean = true,
   style: BrButtonStyle = BrButtonStyle.SOLID,
   iconRes: Int? = null,
+  compact: Boolean = false,
+  iconSize: androidx.compose.ui.unit.Dp = 18.dp,
+  trailingIcon: Boolean = false,
+  fillWidth: Boolean = true,
+  trailingText: String? = null,
 ) {
   val spec = LocalThemeSpec.current
   val (face, contentColor) =
@@ -66,20 +71,25 @@ fun BrButton(
     }
     Box(
       Modifier
-        .fillMaxWidth()
+        .then(if (fillWidth) Modifier.fillMaxWidth() else Modifier)
         .background(if (enabled) face else spec.surfaceAlt)
         .border(spec.borderWidth, if (enabled) borderColor else spec.muted)
         .clickable(enabled = enabled, onClick = onClick)
-        .padding(PaddingValues(horizontal = 20.dp, vertical = 14.dp)),
+        .padding(
+          PaddingValues(
+            horizontal = if (compact) 14.dp else 20.dp,
+            vertical = if (compact) 8.dp else 14.dp,
+          ),
+        ),
       contentAlignment = Alignment.Center,
     ) {
       Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        if (iconRes != null) {
+        if (iconRes != null && !trailingIcon) {
           Icon(
             painter = painterResource(iconRes),
             contentDescription = null,
             tint = if (enabled) contentColor else spec.muted,
-            modifier = Modifier.size(18.dp),
+            modifier = Modifier.size(iconSize),
           )
         }
         Text(
@@ -88,6 +98,22 @@ fun BrButton(
           color = if (enabled) contentColor else spec.muted,
           fontWeight = FontWeight.Bold,
         )
+        if (iconRes != null && trailingIcon) {
+          Icon(
+            painter = painterResource(iconRes),
+            contentDescription = null,
+            tint = if (enabled) contentColor else spec.muted,
+            modifier = Modifier.size(iconSize),
+          )
+        }
+        if (trailingText != null) {
+          Text(
+            text = trailingText,
+            style = MaterialTheme.typography.labelLarge,
+            color = if (enabled) contentColor else spec.muted,
+            fontWeight = FontWeight.Bold,
+          )
+        }
       }
     }
   }

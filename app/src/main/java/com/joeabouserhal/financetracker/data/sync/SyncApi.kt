@@ -53,6 +53,7 @@ object SyncTables {
       Spec("categories", "id"),
       Spec("accounts", "id"),
       Spec("presets", "id"),
+      Spec("goals", "id"),
       Spec("transactions", "id"),
       Spec("profiles", "user_id"),
     )

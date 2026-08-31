@@ -27,5 +27,11 @@ import kotlinx.serialization.Serializable
 /** Category management (pushed from Options). */
 @Serializable data object Categories : NavKey
 
+/** Preset templates (pushed from Options). */
+@Serializable data object Presets : NavKey
+
+/** Completed goals list (pushed from the Goals tab). */
+@Serializable data object CompletedGoals : NavKey
+
 /** One account's detail: balance, monthly totals, its transactions. */
 @Serializable data class AccountDetail(val accountId: String) : NavKey

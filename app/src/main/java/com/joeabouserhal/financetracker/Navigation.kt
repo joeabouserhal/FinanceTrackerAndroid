@@ -27,8 +27,12 @@ import androidx.navigation3.runtime.rememberNavBackStack
 import androidx.navigation3.ui.NavDisplay
 import com.joeabouserhal.financetracker.ui.auth.AuthScreen
 import com.joeabouserhal.financetracker.ui.categories.CategoriesScreen
+import com.joeabouserhal.financetracker.ui.dashboard.DashboardScreen
+import com.joeabouserhal.financetracker.ui.goals.CompletedGoalsScreen
+import com.joeabouserhal.financetracker.ui.goals.GoalsScreen
 import com.joeabouserhal.financetracker.ui.main.MainTabs
 import com.joeabouserhal.financetracker.ui.presets.PresetPickerScreen
+import com.joeabouserhal.financetracker.ui.presets.PresetsScreen
 import com.joeabouserhal.financetracker.ui.rememberAppContainer
 import com.joeabouserhal.financetracker.ui.settings.AccountDetailScreen
 import com.joeabouserhal.financetracker.ui.settings.CurrenciesAccountsScreen
@@ -116,6 +120,8 @@ fun MainNavigation() {
               onOpenCurrenciesAccounts = { backStack.add(CurrenciesAccounts) },
               onOpenThemes = { backStack.add(Themes) },
               onOpenCategories = { backStack.add(Categories) },
+              onOpenPresets = { backStack.add(Presets) },
+              onOpenCompletedGoals = { backStack.add(CompletedGoals) },
               onOpenAuth = { backStack.add(AuthFlow) },
             )
           }
@@ -178,6 +184,18 @@ fun MainNavigation() {
           }
           entry<Categories> {
             CategoriesScreen(
+              onBack = { backStack.removeLastOrNull() },
+              modifier = Modifier.safeDrawingPadding(),
+            )
+          }
+          entry<Presets> {
+            PresetsScreen(
+              onBack = { backStack.removeLastOrNull() },
+              modifier = Modifier.safeDrawingPadding(),
+            )
+          }
+          entry<CompletedGoals> {
+            CompletedGoalsScreen(
               onBack = { backStack.removeLastOrNull() },
               modifier = Modifier.safeDrawingPadding(),
             )

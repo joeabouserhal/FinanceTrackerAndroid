@@ -7,6 +7,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 import com.joeabouserhal.financetracker.data.local.dao.AccountDao
 import com.joeabouserhal.financetracker.data.local.dao.CategoryDao
 import com.joeabouserhal.financetracker.data.local.dao.CurrencyDao
+import com.joeabouserhal.financetracker.data.local.dao.GoalDao
 import com.joeabouserhal.financetracker.data.local.dao.OutboxDao
 import com.joeabouserhal.financetracker.data.local.dao.PresetDao
 import com.joeabouserhal.financetracker.data.local.dao.ProfileDao
@@ -15,6 +16,7 @@ import com.joeabouserhal.financetracker.data.local.dao.TransactionDao
 import com.joeabouserhal.financetracker.data.local.entities.AccountEntity
 import com.joeabouserhal.financetracker.data.local.entities.CategoryEntity
 import com.joeabouserhal.financetracker.data.local.entities.CurrencyEntity
+import com.joeabouserhal.financetracker.data.local.entities.GoalEntity
 import com.joeabouserhal.financetracker.data.local.entities.OutboxEntity
 import com.joeabouserhal.financetracker.data.local.entities.PresetEntity
 import com.joeabouserhal.financetracker.data.local.entities.ProfileEntity
@@ -26,6 +28,7 @@ import com.joeabouserhal.financetracker.data.local.entities.TransactionEntity
     [
       CurrencyEntity::class,
       AccountEntity::class,
+      GoalEntity::class,
       CategoryEntity::class,
       PresetEntity::class,
       TransactionEntity::class,
@@ -33,12 +36,13 @@ import com.joeabouserhal.financetracker.data.local.entities.TransactionEntity
       OutboxEntity::class,
       SyncMetaEntity::class,
     ],
-  version = 5,
+  version = 7,
   exportSchema = true,
 )
 abstract class AppDatabase : RoomDatabase() {
   abstract fun currencyDao(): CurrencyDao
   abstract fun accountDao(): AccountDao
+  abstract fun goalDao(): GoalDao
   abstract fun categoryDao(): CategoryDao
   abstract fun presetDao(): PresetDao
   abstract fun transactionDao(): TransactionDao
@@ -110,5 +114,37 @@ object Migrations {
       }
     }
 
-  val ALL: Array<Migration> = arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
+  val MIGRATION_5_6 =
+    object : Migration(5, 6) {
+      override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(
+          """
+          CREATE TABLE IF NOT EXISTS `goals` (
+            `id` TEXT NOT NULL,
+            `owner_id` TEXT NOT NULL,
+            `name` TEXT NOT NULL,
+            `target_minor` INTEGER NOT NULL,
+            `currency_id` TEXT NOT NULL,
+            `account_id` TEXT,
+            `created_at` TEXT NOT NULL,
+            `updated_at` TEXT NOT NULL DEFAULT '',
+            PRIMARY KEY(`id`),
+            FOREIGN KEY(`currency_id`) REFERENCES `currencies`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE,
+            FOREIGN KEY(`account_id`) REFERENCES `accounts`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE
+          )
+          """.trimIndent(),
+        )
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_goals_owner_id` ON `goals` (`owner_id`)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_goals_currency_id` ON `goals` (`currency_id`)")
+      }
+    }
+
+  val MIGRATION_6_7 =
+    object : Migration(6, 7) {
+      override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE `goals` ADD COLUMN `completed` INTEGER NOT NULL DEFAULT 0")
+      }
+    }
+
+  val ALL: Array<Migration> = arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7)
 }

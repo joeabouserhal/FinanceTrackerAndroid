@@ -26,6 +26,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -59,8 +60,8 @@ enum class PresetFilter(val type: TransactionType?) {
 
 @Composable
 fun PresetsScreen(
-  filter: PresetFilter,
-  onFilterChange: (PresetFilter) -> Unit,
+  onBack: () -> Unit,
+  modifier: Modifier = Modifier,
 ) {
   val container = rememberAppContainer()
   val scope = rememberCoroutineScope()
@@ -68,11 +69,14 @@ fun PresetsScreen(
   val session by container.sessionManager.session.collectAsStateWithLifecycle(initialValue = Session())
   val ownerId = session.ownerId
 
+  var filter by rememberSaveable { mutableStateOf(PresetFilter.ALL) }
+
+  val filterType = filter.type
   val presets by remember(ownerId, filter) {
-    if (filter.type == null) {
+    if (filterType == null) {
       container.presetRepository.observeAll(ownerId)
     } else {
-      container.presetRepository.observeByType(ownerId, filter.type)
+      container.presetRepository.observeByType(ownerId, filterType)
     }
   }.collectAsStateWithLifecycle(initialValue = emptyList())
   val currencies by remember(ownerId) { container.currencyRepository.observeAll(ownerId) }
@@ -87,7 +91,13 @@ fun PresetsScreen(
   var archiving by remember { mutableStateOf<PresetEntity?>(null) }
   var error by remember { mutableStateOf<String?>(null) }
 
-  Column(Modifier.fillMaxSize().background(spec.background)) {
+  Column(modifier.fillMaxSize().background(spec.background)) {
+    Row(
+      Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+      verticalAlignment = Alignment.CenterVertically,
+    ) {
+      Text("< BACK", style = MaterialTheme.typography.labelMedium, color = spec.accent, modifier = Modifier.padding(4.dp).minimumInteractiveComponentSize().clickable(onClick = onBack))
+    }
     ScreenHeader(title = "Presets", subtitle = "ONE-TAP TEMPLATES FOR THE ADD-TRANSACTION FORM")
 
     Column(
@@ -98,9 +108,9 @@ fun PresetsScreen(
       verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
       Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-        BrChip("All", selected = filter == PresetFilter.ALL, onClick = { onFilterChange(PresetFilter.ALL) })
-        BrChip("Expense", selected = filter == PresetFilter.EXPENSE, onClick = { onFilterChange(PresetFilter.EXPENSE) }, colorDot = spec.expense)
-        BrChip("Income", selected = filter == PresetFilter.INCOME, onClick = { onFilterChange(PresetFilter.INCOME) }, colorDot = spec.income)
+        BrChip("All", selected = filter == PresetFilter.ALL, onClick = { filter = PresetFilter.ALL })
+        BrChip("Expense", selected = filter == PresetFilter.EXPENSE, onClick = { filter = PresetFilter.EXPENSE }, colorDot = spec.expense)
+        BrChip("Income", selected = filter == PresetFilter.INCOME, onClick = { filter = PresetFilter.INCOME }, colorDot = spec.income)
       }
 
       error?.let { Text(it, style = MaterialTheme.typography.labelMedium, color = spec.expense) }

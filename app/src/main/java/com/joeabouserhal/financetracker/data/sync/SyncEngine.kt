@@ -147,6 +147,7 @@ class SyncEngine(
       "categories" -> rows.forEach { row -> safe { applyCategory(ownerId, SyncMappers.category(row)) } }
       "accounts" -> rows.forEach { row -> safe { applyAccount(ownerId, SyncMappers.account(row)) } }
       "presets" -> rows.forEach { row -> safe { applyPreset(ownerId, SyncMappers.preset(row)) } }
+      "goals" -> rows.forEach { row -> safe { applyGoal(ownerId, SyncMappers.goal(row)) } }
       "transactions" -> rows.forEach { row -> safe { applyTransaction(ownerId, SyncMappers.transaction(row)) } }
       "profiles" -> rows.forEach { row -> safe { applyProfile(ownerId, SyncMappers.profile(row)) } }
       else -> throw IllegalArgumentException("Unknown sync table '$table'")
@@ -204,6 +205,25 @@ class SyncEngine(
           remote.defaultCategoryId,
           remote.defaultAccountId,
           remote.archived,
+          remote.updatedAt,
+        )
+    }
+  }
+
+  private suspend fun applyGoal(ownerId: String, remote: com.joeabouserhal.financetracker.data.local.entities.GoalEntity) {
+    val dao = db.goalDao()
+    val local = dao.getById(ownerId, remote.id)
+    when {
+      local == null -> dao.insertAll(listOf(remote))
+      SyncMappers.remoteAtLeastAsNew(local.updatedAt, remote.updatedAt) ->
+        dao.updateFromSync(
+          ownerId,
+          remote.id,
+          remote.name,
+          remote.targetMinor,
+          remote.currencyId,
+          remote.accountId,
+          remote.completed,
           remote.updatedAt,
         )
     }

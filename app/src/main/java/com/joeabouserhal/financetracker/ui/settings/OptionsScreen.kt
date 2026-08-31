@@ -49,6 +49,7 @@ fun OptionsScreen(
   onOpenCurrenciesAccounts: () -> Unit,
   onOpenThemes: () -> Unit,
   onOpenCategories: () -> Unit,
+  onOpenPresets: () -> Unit,
   onSignIn: () -> Unit,
   modifier: Modifier = Modifier,
 ) {
@@ -125,6 +126,7 @@ fun OptionsScreen(
       PageRow("THEMES", onOpenThemes)
       PageRow("CURRENCIES & ACCOUNTS", onOpenCurrenciesAccounts)
       PageRow("CATEGORIES", onOpenCategories)
+      PageRow("PRESETS", onOpenPresets)
 
       // ------------------------------------------------------------------ SYNC
       SectionTitle("SYNC")
