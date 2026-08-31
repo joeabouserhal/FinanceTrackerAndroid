@@ -6,19 +6,28 @@ import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.AnchoredDraggableState
+import androidx.compose.foundation.gestures.DraggableAnchors
+import androidx.compose.foundation.gestures.Orientation
+import androidx.compose.foundation.gestures.anchoredDraggable
+import androidx.compose.foundation.gestures.animateTo
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.MaterialTheme
@@ -29,12 +38,17 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
+import kotlin.math.roundToInt
+import kotlinx.coroutines.launch
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.joeabouserhal.financetracker.data.local.entities.TransactionType
 import com.joeabouserhal.financetracker.data.repositories.TransactionListItem
@@ -65,11 +79,13 @@ fun TransactionsScreen(
 ) {
   val container = rememberAppContainer()
   val spec = LocalThemeSpec.current
+  val scope = rememberCoroutineScope()
   val session by container.sessionManager.session.collectAsStateWithLifecycle(initialValue = Session())
   val ownerId = session.ownerId
 
   var filters by rememberSaveable(stateSaver = TransactionFilterStateSaver) { mutableStateOf(TransactionFilterState()) }
   var filtersOpen by rememberSaveable { mutableStateOf(false) }
+  var deleteTarget by remember { mutableStateOf<TransactionListItem?>(null) }
 
   val items by remember(ownerId) {
     combine(
@@ -106,8 +122,9 @@ fun TransactionsScreen(
   val grouped = remember(visible) { TransactionFiltering.groupByDate(visible) }
   val activeCount = TransactionFiltering.activeCount(filters)
 
-  Column(Modifier.fillMaxSize().background(spec.background)) {
-    ScreenHeader(title = "Transactions")
+  Box(Modifier.fillMaxSize().background(spec.background)) {
+    Column(Modifier.fillMaxSize()) {
+      ScreenHeader(title = "Transactions")
 
     Column(
       Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
@@ -169,20 +186,141 @@ fun TransactionsScreen(
               DateHeader(date, groupItems)
             }
             items(groupItems, key = { it.transaction.id }) { item ->
-              TransactionRow(
-                item = item,
-                onPress = { onEditTransaction(item.transaction.id) },
+              SwipeRevealRow(
+                onDelete = { deleteTarget = item },
                 modifier = Modifier.animateItem(),
-              )
+              ) {
+                TransactionRow(
+                  item = item,
+                  onPress = { onEditTransaction(item.transaction.id) },
+                )
+              }
             }
           }
         }
       }
-      ExpandableFab(
-        onAddTransaction = onAddTransaction,
-        onAddFromPreset = onAddFromPreset,
-        modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp),
-      )
+    }
+    }
+    // The FAB overlays the WHOLE page so expanding the filter panel never
+    // moves it.
+    ExpandableFab(
+      onAddTransaction = onAddTransaction,
+      onAddFromPreset = onAddFromPreset,
+      modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp),
+    )
+  }
+
+  deleteTarget?.let { item ->
+    val tx = item.transaction
+    val amount = if (tx.type == TransactionType.INCOME) tx.amount else -tx.amount
+    BrDialog(
+      title = "DELETE TRANSACTION?",
+      onDismiss = { deleteTarget = null },
+      confirmText = "DELETE",
+      onConfirm = {
+        val target = deleteTarget
+        deleteTarget = null
+        scope.launch {
+          target?.let { container.transactionRepository.remove(ownerId, it.transaction.id) }
+        }
+      },
+    ) {
+      Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text(
+          tx.title?.takeIf { it.isNotBlank() } ?: item.categoryName,
+          style = MaterialTheme.typography.bodyMedium,
+          color = spec.ink,
+        )
+        Text(
+          "${tx.type.name.lowercase().replaceFirstChar { it.uppercase() }} · ${formatDateLabel(tx.date)}",
+          style = MaterialTheme.typography.labelSmall,
+          color = spec.muted,
+        )
+        Text(
+          Money.format(amount, item.currencySymbol),
+          style = MaterialTheme.typography.titleLarge,
+          color = if (amount < 0) spec.expense else spec.income,
+        )
+        Text("This removes it permanently.", style = MaterialTheme.typography.bodySmall, color = spec.muted)
+      }
+    }
+  }
+}
+
+/** Left-swipe reveals a DELETE action behind the row; nothing is removed
+ * until the caller confirms. */
+private enum class RevealState { Closed, Open }
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun SwipeRevealRow(
+  onDelete: () -> Unit,
+  modifier: Modifier = Modifier,
+  content: @Composable () -> Unit,
+) {
+  val spec = LocalThemeSpec.current
+  val scope = rememberCoroutineScope()
+  val density = LocalDensity.current
+  val actionWidthPx = with(density) { 88.dp.toPx() }
+
+  val state =
+    remember {
+      AnchoredDraggableState<RevealState>(initialValue = RevealState.Closed).apply {
+        updateAnchors(
+          DraggableAnchors {
+            RevealState.Closed at 0f
+            RevealState.Open at -actionWidthPx
+          },
+        )
+      }
+    }
+
+  Box(modifier) {
+    // Revealed action strip, behind the row's right edge: red 88dp-wide area
+    // with a thin separator at its left edge and DELETE centered inside it.
+    Box(
+      Modifier
+        .matchParentSize()
+        .background(spec.expense),
+      contentAlignment = Alignment.CenterEnd,
+    ) {
+      Box(
+        Modifier
+          .fillMaxHeight()
+          .width(88.dp),
+        contentAlignment = Alignment.Center,
+      ) {
+        Box(
+          Modifier
+            .align(Alignment.CenterStart)
+            .fillMaxHeight()
+            .width(2.dp)
+            .background(spec.onAccent.copy(alpha = 0.85f)),
+        )
+        Text(
+          "DELETE",
+          style = MaterialTheme.typography.labelMedium,
+          color = spec.onAccent,
+          modifier =
+            Modifier
+              .minimumInteractiveComponentSize()
+              .clickable {
+                scope.launch { state.animateTo(RevealState.Closed) }
+                onDelete()
+              }
+              .padding(4.dp),
+        )
+      }
+    }
+
+    // Foreground row, slides left to reveal the action.
+    Box(
+      Modifier
+        .offset { IntOffset(state.requireOffset().roundToInt(), 0) }
+        .anchoredDraggable(state, Orientation.Horizontal)
+        .background(spec.background),
+    ) {
+      content()
     }
   }
 }
