@@ -12,7 +12,7 @@
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
         android:windowSoftInputMode="adjustResize"
-        android:theme="@style/Theme.FinanceTracker">
+        android:theme="@style/Theme.FinanceTracker.Starting">
         <activity
             android:name=".MainActivity"
             android:exported="true"

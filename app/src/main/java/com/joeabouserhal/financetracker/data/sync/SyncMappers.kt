@@ -99,6 +99,7 @@ object SyncMappers {
       title = row.optString("title"),
       notes = row.optString("notes"),
       presetId = row.optString("preset_id"),
+      goalId = row.optString("goal_id"),
       createdAt = row.createdAt(),
       updatedAt = row.reqString("updated_at"),
     )

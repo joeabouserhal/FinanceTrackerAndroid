@@ -241,7 +241,13 @@ fun TransactionsScreen(
           style = MaterialTheme.typography.titleLarge,
           color = if (amount < 0) spec.expense else spec.income,
         )
-        Text("This removes it permanently.", style = MaterialTheme.typography.bodySmall, color = spec.muted)
+        Text(
+          if (tx.type == TransactionType.GOAL)
+            "This also un-completes its goal and removes the goal's other withdrawals."
+          else "This removes it permanently.",
+          style = MaterialTheme.typography.bodySmall,
+          color = spec.muted,
+        )
       }
     }
   }

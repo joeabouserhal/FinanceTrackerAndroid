@@ -38,9 +38,15 @@ fun TransactionRow(
 ) {
   val spec = LocalThemeSpec.current
   val tx = item.transaction
+  val isGoal = tx.type == TransactionType.GOAL
   val signed = if (tx.type == TransactionType.INCOME) tx.amount else -tx.amount
   val amountColor by animateColorAsState(
-    targetValue = if (tx.type == TransactionType.INCOME) spec.income else spec.expense,
+    targetValue =
+      when (tx.type) {
+        TransactionType.INCOME -> spec.income
+        TransactionType.GOAL -> spec.goal
+        TransactionType.EXPENSE -> spec.expense
+      },
     animationSpec = tween(200),
     label = "amountColor",
   )
@@ -56,7 +62,7 @@ fun TransactionRow(
     Box(
       Modifier
         .size(12.dp)
-        .background(parseColor(item.categoryColor)),
+        .background(if (isGoal) spec.goal else parseColor(item.categoryColor)),
     )
     Column(
       Modifier
@@ -71,7 +77,11 @@ fun TransactionRow(
         maxLines = 1,
         overflow = TextOverflow.Ellipsis,
       )
-      val meta = listOfNotNull(item.categoryName.takeIf { tx.title != null }, item.accountName).joinToString(" · ")
+      val meta =
+        listOfNotNull(
+          if (isGoal) "Goal" else item.categoryName.takeIf { tx.title != null },
+          item.accountName,
+        ).joinToString(" · ")
       if (meta.isNotBlank()) {
         Text(meta, style = MaterialTheme.typography.labelSmall, color = spec.muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
       }

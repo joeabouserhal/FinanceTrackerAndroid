@@ -1,5 +1,6 @@
 package com.joeabouserhal.financetracker.ui.transactions
 
+import com.joeabouserhal.financetracker.data.local.entities.TransactionType
 import com.joeabouserhal.financetracker.data.repositories.TransactionListItem
 
 enum class TypeFilter(val label: String) { ALL("All"), INCOME("Income"), EXPENSE("Expense") }
@@ -51,7 +52,14 @@ object TransactionFiltering {
       .asSequence()
       .filter { item ->
         val tx = item.transaction
-        (f.type == TypeFilter.ALL || tx.type.name == f.type.name) &&
+        val typeMatches =
+          when (f.type) {
+            TypeFilter.ALL -> true
+            TypeFilter.INCOME -> tx.type == TransactionType.INCOME
+            // Goal withdrawals are money out of an account, so EXPENSE includes them.
+            TypeFilter.EXPENSE -> tx.type == TransactionType.EXPENSE || tx.type == TransactionType.GOAL
+          }
+        typeMatches &&
           (f.categoryIds.isEmpty() || tx.categoryId in f.categoryIds) &&
           (f.accountIds.isEmpty() || tx.accountId in f.accountIds) &&
           (f.currencyIds.isEmpty() || tx.currencyId in f.currencyIds) &&

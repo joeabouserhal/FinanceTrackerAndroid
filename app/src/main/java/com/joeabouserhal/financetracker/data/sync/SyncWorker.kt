@@ -71,10 +71,10 @@ class SyncScheduler(private val context: Context) {
         .setConstraints(networkConstraint)
         .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 30, TimeUnit.SECONDS)
         .build()
-    // APPEND_OR_REPLACE: if a sync is already running (e.g. after a burst of
-    // edits), queue another pass behind it instead of cancelling it; replaces
-    // stale failed/cancelled work.
-    workManager.enqueueUniqueWork(SyncWorker.NOW_WORK, ExistingWorkPolicy.APPEND_OR_REPLACE, request)
+    // REPLACE: a manual/automatic "sync now" must run immediately — cancel any
+    // backed-off/pending retry and start a fresh attempt instead of queuing
+    // behind a delayed job (which made the button look dead).
+    workManager.enqueueUniqueWork(SyncWorker.NOW_WORK, ExistingWorkPolicy.REPLACE, request)
   }
 
   /** Sign-out: stop both periodic and pending on-demand syncs. */

@@ -31,6 +31,9 @@ interface TransactionDao {
   @Query("SELECT * FROM transactions WHERE owner_id = :ownerId AND id = :id")
   suspend fun getById(ownerId: String, id: String): TransactionEntity?
 
+  @Query("SELECT * FROM transactions WHERE owner_id = :ownerId AND goal_id = :goalId")
+  suspend fun getByGoal(ownerId: String, goalId: String): List<TransactionEntity>
+
   @Query("SELECT COUNT(*) FROM transactions WHERE owner_id = :ownerId AND account_id = :accountId")
   suspend fun countByAccount(ownerId: String, accountId: String): Int
 
@@ -49,7 +52,7 @@ interface TransactionDao {
     UPDATE transactions
     SET type = :type, amount = :amount, currency_id = :currencyId, category_id = :categoryId,
         account_id = :accountId, date = :date, title = :title, notes = :notes, preset_id = :presetId,
-        updated_at = :updatedAt
+        goal_id = :goalId, updated_at = :updatedAt
     WHERE owner_id = :ownerId AND id = :id
     """
   )
@@ -65,6 +68,7 @@ interface TransactionDao {
     title: String?,
     notes: String?,
     presetId: String?,
+    goalId: String?,
     updatedAt: String,
   )
 

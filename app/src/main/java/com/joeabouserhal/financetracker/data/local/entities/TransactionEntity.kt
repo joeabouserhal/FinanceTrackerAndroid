@@ -34,6 +34,12 @@ import androidx.room.PrimaryKey
         childColumns = ["preset_id"],
         onDelete = ForeignKey.SET_NULL,
       ),
+      ForeignKey(
+        entity = GoalEntity::class,
+        parentColumns = ["id"],
+        childColumns = ["goal_id"],
+        onDelete = ForeignKey.SET_NULL,
+      ),
     ],
   indices =
     [
@@ -42,6 +48,7 @@ import androidx.room.PrimaryKey
       Index("category_id"),
       Index("account_id"),
       Index("preset_id"),
+      Index("goal_id"),
       Index(value = ["owner_id", "date"]),
     ],
 )
@@ -59,6 +66,8 @@ data class TransactionEntity(
   val title: String?,
   val notes: String?,
   @ColumnInfo(name = "preset_id") val presetId: String?,
+  /** Goal that produced this withdrawal; set for GOAL-type transactions. */
+  @ColumnInfo(name = "goal_id") val goalId: String?,
   @ColumnInfo(name = "created_at") val createdAt: String,
   @ColumnInfo(name = "updated_at") val updatedAt: String,
 )

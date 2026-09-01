@@ -271,7 +271,8 @@ fun TransactionFormScreen(
 
       BrSegmentedToggle(
         options = listOf("Expense", "Income"),
-        selectedIndex = if (type == TransactionType.EXPENSE) 0 else 1,
+        // GOAL withdrawals are money-out, so they sit on the Expense side.
+        selectedIndex = if (type == TransactionType.INCOME) 1 else 0,
         onSelect = { type = if (it == 0) TransactionType.EXPENSE else TransactionType.INCOME },
         optionColors = listOf(spec.expense, spec.income),
       )
@@ -396,7 +397,12 @@ fun TransactionFormScreen(
         }
       },
     ) {
-      Text("This removes it permanently.", style = MaterialTheme.typography.bodyMedium)
+      Text(
+        if (type == TransactionType.GOAL)
+          "This also un-completes its goal and removes the goal's other withdrawals."
+        else "This removes it permanently.",
+        style = MaterialTheme.typography.bodyMedium,
+      )
     }
   }
 

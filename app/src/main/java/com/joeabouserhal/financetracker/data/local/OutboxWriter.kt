@@ -121,6 +121,7 @@ object OutboxWriter {
         "title" to (e.title?.let { JsonPrimitive(it) } ?: JsonNull),
         "notes" to (e.notes?.let { JsonPrimitive(it) } ?: JsonNull),
         "preset_id" to (e.presetId?.let { JsonPrimitive(it) } ?: JsonNull),
+        "goal_id" to (e.goalId?.let { JsonPrimitive(it) } ?: JsonNull),
       ),
     )
 

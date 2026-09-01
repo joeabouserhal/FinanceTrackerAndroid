@@ -19,6 +19,9 @@ class AccountRepository(
 
   fun observeArchived(ownerId: String): Flow<List<AccountEntity>> = dao.observeArchived(ownerId)
 
+  /** Active + archived accounts, for lookups that must resolve any account. */
+  fun observeAll(ownerId: String): Flow<List<AccountEntity>> = dao.observeAll(ownerId)
+
   fun observeByCurrency(ownerId: String, currencyId: String): Flow<List<AccountEntity>> =
     dao.observeByCurrency(ownerId, currencyId)
 

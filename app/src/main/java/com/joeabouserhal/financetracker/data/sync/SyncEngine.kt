@@ -247,6 +247,7 @@ class SyncEngine(
           remote.title,
           remote.notes,
           remote.presetId,
+          remote.goalId,
           remote.updatedAt,
         )
     }

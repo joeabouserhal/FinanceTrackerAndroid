@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Splash screen: matches the app's dark brutalist background so the
+         cold-start frame blends seamlessly into the first Compose frame. -->
+    <color name="splash_background">#0A0A0A</color>
+</resources>

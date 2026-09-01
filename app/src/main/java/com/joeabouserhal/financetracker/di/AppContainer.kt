@@ -62,9 +62,10 @@ class AppContainer(context: Context) {
     AccountRepository(appDatabase.accountDao(), appDatabase.transactionDao(), appDatabase)
   val categoryRepository: CategoryRepository = CategoryRepository(appDatabase.categoryDao(), appDatabase)
   val presetRepository: PresetRepository = PresetRepository(appDatabase.presetDao(), appDatabase)
-  val goalRepository: GoalRepository = GoalRepository(appDatabase.goalDao(), appDatabase)
   val transactionRepository: TransactionRepository =
-    TransactionRepository(appDatabase.transactionDao(), appDatabase.categoryDao(), appDatabase)
+    TransactionRepository(appDatabase.transactionDao(), appDatabase.categoryDao(), categoryRepository, appDatabase.goalDao(), appDatabase)
+  val goalRepository: GoalRepository =
+    GoalRepository(appDatabase.goalDao(), categoryRepository, transactionRepository, appDatabase)
   val profileRepository: ProfileRepository = ProfileRepository(appDatabase.profileDao(), appDatabase)
   val dashboardRepository: DashboardRepository =
     DashboardRepository(

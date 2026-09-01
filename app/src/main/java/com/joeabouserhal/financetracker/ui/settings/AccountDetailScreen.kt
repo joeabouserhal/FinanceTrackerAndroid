@@ -67,7 +67,7 @@ fun AccountDetailScreen(
         val balance = accountTxs.sumOf { if (it.type == TransactionType.INCOME) it.amount else -it.amount }
         val (from, to) = Dates.monthBounds(YearMonth.now())
         val monthIncome = accountTxs.filter { it.date >= from && it.date <= to && it.type == TransactionType.INCOME }.sumOf { it.amount }
-        val monthExpense = accountTxs.filter { it.date >= from && it.date <= to && it.type == TransactionType.EXPENSE }.sumOf { it.amount }
+        val monthExpense = accountTxs.filter { it.date >= from && it.date <= to && (it.type == TransactionType.EXPENSE || it.type == TransactionType.GOAL) }.sumOf { it.amount }
         val items = enrichTransactions(accountTxs, incomeCategories + expenseCategories, active + archived, currencies)
         AccountDetailState(account?.name ?: "Account", currency?.code ?: "", currency?.symbol ?: "", balance, monthIncome, monthExpense, items)
       }

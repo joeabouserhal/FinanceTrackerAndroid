@@ -16,7 +16,9 @@ fun BrDialog(
   modifier: androidx.compose.ui.Modifier = androidx.compose.ui.Modifier,
   confirmText: String = "SAVE",
   onConfirm: (() -> Unit)? = null,
-  dismissText: String = "CANCEL",
+  confirmEnabled: Boolean = true,
+  /** Pass null to hide the dismiss button entirely. */
+  dismissText: String? = "CANCEL",
   content: @Composable () -> Unit,
 ) {
   val spec = LocalThemeSpec.current
@@ -30,14 +32,20 @@ fun BrDialog(
     text = { Column { content() } },
     confirmButton = {
       if (onConfirm != null) {
-        TextButton(onClick = onConfirm) {
-          Text(confirmText, style = MaterialTheme.typography.labelMedium, color = spec.accent)
+        TextButton(onClick = onConfirm, enabled = confirmEnabled) {
+          Text(
+            confirmText,
+            style = MaterialTheme.typography.labelMedium,
+            color = if (confirmEnabled) spec.accent else spec.muted,
+          )
         }
       }
     },
     dismissButton = {
-      TextButton(onClick = onDismiss) {
-        Text(dismissText, style = MaterialTheme.typography.labelMedium, color = spec.muted)
+      if (dismissText != null) {
+        TextButton(onClick = onDismiss) {
+          Text(dismissText, style = MaterialTheme.typography.labelMedium, color = spec.muted)
+        }
       }
     },
   )

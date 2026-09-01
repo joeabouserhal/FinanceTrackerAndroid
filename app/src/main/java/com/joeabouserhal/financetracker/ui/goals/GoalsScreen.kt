@@ -36,6 +36,7 @@ import com.joeabouserhal.financetracker.data.local.entities.CurrencyEntity
 import com.joeabouserhal.financetracker.data.local.entities.GoalEntity
 import com.joeabouserhal.financetracker.data.local.entities.TransactionEntity
 import com.joeabouserhal.financetracker.data.local.entities.TransactionType
+import com.joeabouserhal.financetracker.data.repositories.GoalCompletionResult
 import com.joeabouserhal.financetracker.data.session.Session
 import com.joeabouserhal.financetracker.theme.LocalThemeSpec
 import com.joeabouserhal.financetracker.ui.components.BrButton
@@ -60,6 +61,14 @@ internal data class GoalProgress(
   val progressMinor: Long,
 )
 
+/** What the congratulation modal shows after a goal is completed. */
+internal data class CompletionNotice(
+  val goalName: String,
+  val symbol: String,
+  /** accountName → minor amount removed. */
+  val deductions: List<Pair<String, Long>>,
+)
+
 @Composable
 fun GoalsScreen(
   onOpenCompletedGoals: () -> Unit,
@@ -76,15 +85,27 @@ fun GoalsScreen(
       container.goalRepository.observeAll(ownerId),
       container.transactionRepository.observeAll(ownerId),
       container.currencyRepository.observeAll(ownerId),
-      container.accountRepository.observeActive(ownerId),
+      // All accounts (not just active) so a goal scoped to an archived
+      // account still shows its real scope instead of "All accounts".
+      container.accountRepository.observeAll(ownerId),
     ) { goals, transactions, currencies, accounts ->
       buildProgress(goals, transactions, currencies, accounts)
     }
   }.collectAsStateWithLifecycle(initialValue = emptyList())
+  val accounts by remember(ownerId) { container.accountRepository.observeActive(ownerId) }
+    .collectAsStateWithLifecycle(initialValue = emptyList())
+  val balances by remember(ownerId) {
+    combine(
+      container.transactionRepository.observeAll(ownerId),
+      container.accountRepository.observeActive(ownerId),
+    ) { transactions, accts -> buildAccountBalances(transactions, accts) }
+  }.collectAsStateWithLifecycle(initialValue = emptyMap())
 
   var adding by remember { mutableStateOf(false) }
   var editing by remember { mutableStateOf<GoalEntity?>(null) }
   var deleting by remember { mutableStateOf<GoalEntity?>(null) }
+  var splitGoal by remember { mutableStateOf<GoalProgress?>(null) }
+  var congratulation by remember { mutableStateOf<CompletionNotice?>(null) }
   var error by remember { mutableStateOf<String?>(null) }
 
   val activeGoals = progress.filter { !it.goal.completed }
@@ -128,8 +149,20 @@ fun GoalsScreen(
             completed = false,
             onTap = { editing = gp.goal },
             onMarkComplete = {
-              scope.launch {
-                container.goalRepository.markComplete(ownerId, gp.goal.id)
+              val goal = gp.goal
+              val accountId = goal.accountId
+              if (accountId != null) {
+                scope.launch {
+                  try {
+                    val result =
+                      container.goalRepository.complete(ownerId, goal.id, mapOf(accountId to goal.targetMinor))
+                    if (result != null) congratulation = completionNotice(result, gp.currency?.symbol ?: "", accounts)
+                  } catch (e: Exception) {
+                    error = e.message
+                  }
+                }
+              } else {
+                splitGoal = gp
               }
             },
           )
@@ -191,7 +224,176 @@ fun GoalsScreen(
       Text("This goal disappears everywhere.", style = MaterialTheme.typography.bodyMedium)
     }
   }
+
+  splitGoal?.let { gp ->
+    GoalSplitDialog(
+      goalProgress = gp,
+      accounts = accounts.filter { it.currencyId == gp.goal.currencyId },
+      balances = balances,
+      onDismiss = { splitGoal = null },
+      onConfirm = { allocations ->
+        splitGoal = null
+        scope.launch {
+          try {
+            val result = container.goalRepository.complete(ownerId, gp.goal.id, allocations)
+            if (result != null) congratulation = completionNotice(result, gp.currency?.symbol ?: "", accounts)
+            error = null
+          } catch (e: Exception) {
+            error = e.message
+          }
+        }
+      },
+    )
+  }
+
+  congratulation?.let { notice ->
+    BrDialog(
+      title = "GOAL COMPLETE!",
+      onDismiss = { congratulation = null },
+      confirmText = "NICE",
+      onConfirm = { congratulation = null },
+      dismissText = null,
+    ) {
+      Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text("Congratulations! 🎉", style = MaterialTheme.typography.headlineSmall, color = spec.goal)
+        Text(
+          "\"${notice.goalName}\" is done.",
+          style = MaterialTheme.typography.bodyLarge,
+          color = spec.ink,
+        )
+        notice.deductions.forEach { (accountName, amount) ->
+          Text(
+            "${Money.format(amount, notice.symbol)} was removed from $accountName",
+            style = MaterialTheme.typography.bodyMedium,
+            color = spec.muted,
+          )
+        }
+      }
+    }
+  }
 }
+
+private fun completionNotice(
+  result: GoalCompletionResult,
+  symbol: String,
+  accounts: List<AccountEntity>,
+): CompletionNotice {
+  val accountNameById = accounts.associateBy { it.id }
+  return CompletionNotice(
+    goalName = result.goalName,
+    symbol = symbol,
+    deductions =
+      result.deductions.map { deduction ->
+        (accountNameById[deduction.accountId]?.name ?: "account") to deduction.amountMinor
+      },
+  )
+}
+
+/** All-accounts goal: ask how much each account contributed before completing. */
+@Composable
+private fun GoalSplitDialog(
+  goalProgress: GoalProgress,
+  accounts: List<AccountEntity>,
+  balances: Map<String, Long>,
+  onDismiss: () -> Unit,
+  onConfirm: (Map<String, Long>) -> Unit,
+) {
+  val spec = LocalThemeSpec.current
+  val goal = goalProgress.goal
+  val symbol = goalProgress.currency?.symbol ?: ""
+
+  var values by remember(goal.id, accounts) {
+    val n = accounts.size
+    val base = if (n > 0) goal.targetMinor / n else 0L
+    val remainder = if (n > 0) goal.targetMinor % n else 0L
+    mutableStateOf(accounts.mapIndexed { index, a -> a.id to minorToText(if (index == 0) base + remainder else base) })
+  }
+  var splitError by remember { mutableStateOf<String?>(null) }
+
+  val parsed = accounts.map { a ->
+    val raw = values.firstOrNull { it.first == a.id }?.second ?: ""
+    a.id to textToMinor(raw)
+  }
+  val invalid = parsed.any { it.second == Long.MIN_VALUE || it.second < 0 }
+  val enteredTotal = if (invalid) null else parsed.sumOf { it.second }
+  val exact = enteredTotal == goal.targetMinor
+
+  BrDialog(
+    title = "SPLIT ACROSS ACCOUNTS",
+    onDismiss = onDismiss,
+    confirmText = "COMPLETE",
+    confirmEnabled = exact,
+    onConfirm = {
+      when {
+        invalid -> splitError = "Enter a valid amount (or 0) for every account"
+        !exact -> splitError = "The splits must add up to ${Money.format(goal.targetMinor, symbol)}"
+        else -> onConfirm(parsed.toMap())
+      }
+    },
+  ) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+      Text(
+        "TOTAL NEEDED: ${Money.format(goal.targetMinor, symbol)}",
+        style = MaterialTheme.typography.labelLarge,
+        color = spec.accent,
+        fontWeight = FontWeight.Bold,
+      )
+      if (accounts.isEmpty()) {
+        Text(
+          "No active ${goalProgress.currency?.code ?: ""} accounts — reactivate one or edit the goal to pick an account.",
+          style = MaterialTheme.typography.bodyMedium,
+          color = spec.muted,
+        )
+      } else {
+        Text(
+          "How much was taken from each ${goalProgress.currency?.code ?: ""} account?",
+          style = MaterialTheme.typography.bodyMedium,
+          color = spec.muted,
+        )
+      }
+      accounts.forEach { account ->
+        val available = balances[account.id] ?: 0L
+        BrTextField(
+          value = values.firstOrNull { it.first == account.id }?.second ?: "",
+          onValueChange = { text ->
+            values = values.map { (id, value) -> if (id == account.id) id to text else id to value }
+          },
+          label = "${account.name} · ${Money.format(available, symbol)} in account",
+          keyboardOptions =
+            androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Decimal),
+          suffix = { Text(symbol, style = MaterialTheme.typography.bodyLarge, color = spec.muted) },
+        )
+      }
+      splitError?.let { Text(it, style = MaterialTheme.typography.labelSmall, color = spec.expense) }
+      if (!invalid) {
+        val entered = enteredTotal ?: 0L
+        val delta = goal.targetMinor - entered
+        Text(
+          when {
+            delta > 0 -> "ADDS UP TO ${Money.format(entered, symbol)} — ${Money.format(delta, symbol)} still needed"
+            delta < 0 -> "ADDS UP TO ${Money.format(entered, symbol)} — ${Money.format(kotlin.math.abs(delta), symbol)} over"
+            else -> "ADDS UP TO ${Money.format(entered, symbol)} — EXACT MATCH ✓"
+          },
+          style = MaterialTheme.typography.labelMedium,
+          color = if (exact) spec.income else spec.expense,
+          fontWeight = FontWeight.Bold,
+        )
+      }
+    }
+  }
+}
+
+private fun minorToText(minor: Long): String =
+  if (minor % 100 == 0L) (minor / 100).toString() else "${minor / 100}.${(minor % 100).toString().padStart(2, '0')}"
+
+private fun textToMinor(text: String): Long =
+  text.trim().takeIf { it.isNotBlank() }?.let {
+    try {
+      BigDecimal(Money.normalizeDecimalInput(it)).setScale(2, RoundingMode.HALF_UP).movePointRight(2).longValueExact()
+    } catch (_: Exception) {
+      Long.MIN_VALUE
+    }
+  } ?: 0L
 
 internal fun buildProgress(
   goals: List<GoalEntity>,
@@ -212,6 +414,19 @@ internal fun buildProgress(
     val progressMinor = goal.accountId?.let { netByAccount[it] ?: 0L } ?: (netByCurrency[goal.currencyId] ?: 0L)
     GoalProgress(goal, currencyById[goal.currencyId], goal.accountId?.let { accountById[it] }, progressMinor)
   }
+}
+
+/** Net balance (minor units) per account, including zero-balance accounts. */
+internal fun buildAccountBalances(
+  transactions: List<TransactionEntity>,
+  accounts: List<AccountEntity>,
+): Map<String, Long> {
+  val net = HashMap<String, Long>()
+  for (t in transactions) {
+    val signed = if (t.type == TransactionType.INCOME) t.amount else -t.amount
+    t.accountId?.let { net[it] = (net[it] ?: 0L) + signed }
+  }
+  return accounts.associate { it.id to (net[it.id] ?: 0L) }
 }
 
 @Composable

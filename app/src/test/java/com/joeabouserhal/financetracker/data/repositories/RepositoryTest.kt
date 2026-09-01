@@ -35,6 +35,7 @@ class RepositoryTest {
   private lateinit var categoryRepo: CategoryRepository
   private lateinit var transactionRepo: TransactionRepository
   private lateinit var dashboardRepo: DashboardRepository
+  private lateinit var goalRepo: GoalRepository
 
   @Before
   fun setup() {
@@ -48,8 +49,9 @@ class RepositoryTest {
     currencyRepo = CurrencyRepository(currencyDao, db)
     accountRepo = AccountRepository(accountDao, transactionDao, db)
     categoryRepo = CategoryRepository(categoryDao, db)
-    transactionRepo = TransactionRepository(transactionDao, categoryDao, db)
+    transactionRepo = TransactionRepository(transactionDao, categoryDao, categoryRepo, db.goalDao(), db)
     dashboardRepo = DashboardRepository(currencyDao, accountDao, db.categoryDao(), transactionDao)
+    goalRepo = GoalRepository(db.goalDao(), categoryRepo, transactionRepo, db)
 
     runBlocking { GuestSeeder.seedGuestDefaults(db, GUEST_OWNER_ID) }
   }
@@ -450,5 +452,198 @@ class RepositoryTest {
 
     assertEquals(opsBefore + 1, opsAfter.size)
     assertEquals(OutboxAction.UPDATE, opsAfter.last().action)
+  }
+
+  @Test
+  fun `completing a specific-account goal debits it with a GOAL transaction`() = runTest {
+    val currency = currencyRepo.getAll(GUEST_OWNER_ID).first()
+    val account = accountRepo.observeActive(GUEST_OWNER_ID).first().first()
+    val goal = goalRepo.add(GUEST_OWNER_ID, "Trip fund", 5000, currency.id, account.id)
+
+    val result = goalRepo.complete(GUEST_OWNER_ID, goal.id, mapOf(account.id to 5000))
+
+    assertEquals("Trip fund", result?.goalName)
+    assertEquals(listOf(account.id to 5000L), result?.deductions?.map { it.accountId to it.amountMinor })
+    val txs = db.transactionDao().getAll(GUEST_OWNER_ID)
+    assertEquals(1, txs.size)
+    val tx = txs.single()
+    assertEquals(TransactionType.GOAL, tx.type)
+    assertEquals(5000, tx.amount)
+    assertEquals(currency.id, tx.currencyId)
+    assertEquals(account.id, tx.accountId)
+    assertEquals("Trip fund", tx.title)
+    val goalCategory = db.categoryDao().getAll(GUEST_OWNER_ID).first { it.name == CategoryRepository.GOAL_CATEGORY_NAME }
+    assertEquals(goalCategory.id, tx.categoryId)
+    assertEquals(CategoryRepository.GOAL_CATEGORY_COLOR, goalCategory.color)
+    assertEquals(TransactionType.EXPENSE, goalCategory.type)
+    assertTrue(db.goalDao().getById(GUEST_OWNER_ID, goal.id)?.completed == true)
+  }
+
+  @Test
+  fun `the Goal category is created once and reused`() = runTest {
+    val first = categoryRepo.ensureGoalCategory(GUEST_OWNER_ID)
+    val second = categoryRepo.ensureGoalCategory(GUEST_OWNER_ID)
+
+    assertEquals(first.id, second.id)
+    assertEquals(
+      1,
+      db.categoryDao().getAll(GUEST_OWNER_ID).count { it.name == CategoryRepository.GOAL_CATEGORY_NAME },
+    )
+    assertEquals(CategoryRepository.GOAL_CATEGORY_COLOR, first.color)
+  }
+
+  @Test
+  fun `completing an all-accounts goal only creates transactions for positive allocations`() = runTest {
+    val currency = currencyRepo.getAll(GUEST_OWNER_ID).first()
+    val cash = accountRepo.observeActive(GUEST_OWNER_ID).first().first()
+    val wallet = accountRepo.add(GUEST_OWNER_ID, currency.id, "Wallet")
+    val goal = goalRepo.add(GUEST_OWNER_ID, "Emergency fund", 3000, currency.id, null)
+
+    val result = goalRepo.complete(GUEST_OWNER_ID, goal.id, mapOf(cash.id to 2000, wallet.id to 1000, "ghost-account" to 0))
+
+    assertEquals(2, result?.deductions?.size)
+    val txs = db.transactionDao().getAll(GUEST_OWNER_ID)
+    assertEquals(setOf(cash.id to 2000L, wallet.id to 1000L), txs.map { it.accountId to it.amount }.toSet())
+    assertEquals(2, txs.size)
+    assertTrue(txs.all { it.type == TransactionType.GOAL })
+    assertTrue(db.goalDao().getById(GUEST_OWNER_ID, goal.id)?.completed == true)
+  }
+
+  @Test
+  fun `goal completion rejects splits that do not add up to the target`() = runTest {
+    val currency = currencyRepo.getAll(GUEST_OWNER_ID).first()
+    val account = accountRepo.observeActive(GUEST_OWNER_ID).first().first()
+    val goal = goalRepo.add(GUEST_OWNER_ID, "Trip fund", 5000, currency.id, account.id)
+
+    val thrown =
+      try {
+        goalRepo.complete(GUEST_OWNER_ID, goal.id, mapOf(account.id to 1000))
+        null
+      } catch (e: IllegalArgumentException) {
+        e
+      }
+
+    assertTrue(thrown != null)
+    assertTrue(db.goalDao().getById(GUEST_OWNER_ID, goal.id)?.completed == false)
+    assertTrue(db.transactionDao().getAll(GUEST_OWNER_ID).isEmpty())
+  }
+
+  @Test
+  fun `editing a goal transaction can never flip it to income`() = runTest {
+    val currency = currencyRepo.getAll(GUEST_OWNER_ID).first()
+    val account = accountRepo.observeActive(GUEST_OWNER_ID).first().first()
+    val goal = goalRepo.add(GUEST_OWNER_ID, "Trip fund", 5000, currency.id, account.id)
+    goalRepo.complete(GUEST_OWNER_ID, goal.id, mapOf(account.id to 5000))
+    val tx = db.transactionDao().getByGoal(GUEST_OWNER_ID, goal.id).single()
+
+    transactionRepo.update(
+      ownerId = GUEST_OWNER_ID,
+      id = tx.id,
+      type = TransactionType.INCOME, // the form mistakenly says income
+      amount = 5000,
+      currencyId = currency.id,
+      categoryId = null,
+      accountId = account.id,
+      date = tx.date,
+      title = tx.title,
+      notes = null,
+      presetId = null,
+    )
+
+    val updated = db.transactionDao().getById(GUEST_OWNER_ID, tx.id)!!
+    assertEquals(TransactionType.GOAL, updated.type)
+    assertEquals(goal.id, updated.goalId)
+  }
+
+  @Test
+  fun `undo fully reverses a completion`() = runTest {
+    val currency = currencyRepo.getAll(GUEST_OWNER_ID).first()
+    val cash = accountRepo.observeActive(GUEST_OWNER_ID).first().first()
+    val wallet = accountRepo.add(GUEST_OWNER_ID, currency.id, "Wallet")
+    val goal = goalRepo.add(GUEST_OWNER_ID, "Emergency fund", 3000, currency.id, null)
+    goalRepo.complete(GUEST_OWNER_ID, goal.id, mapOf(cash.id to 2000, wallet.id to 1000))
+    assertEquals(2, db.transactionDao().getByGoal(GUEST_OWNER_ID, goal.id).size)
+
+    goalRepo.markActive(GUEST_OWNER_ID, goal.id)
+
+    assertTrue(db.transactionDao().getByGoal(GUEST_OWNER_ID, goal.id).isEmpty())
+    assertTrue(db.goalDao().getById(GUEST_OWNER_ID, goal.id)?.completed == false)
+  }
+
+  @Test
+  fun `completing twice cannot double-debit`() = runTest {
+    val currency = currencyRepo.getAll(GUEST_OWNER_ID).first()
+    val account = accountRepo.observeActive(GUEST_OWNER_ID).first().first()
+    val goal = goalRepo.add(GUEST_OWNER_ID, "Trip fund", 5000, currency.id, account.id)
+
+    val first = goalRepo.complete(GUEST_OWNER_ID, goal.id, mapOf(account.id to 5000))
+    val second = goalRepo.complete(GUEST_OWNER_ID, goal.id, mapOf(account.id to 5000))
+
+    assertTrue(first != null)
+    assertTrue(second == null)
+    assertEquals(1, db.transactionDao().getByGoal(GUEST_OWNER_ID, goal.id).size)
+  }
+
+  @Test
+  fun `goal completion rejects splits into accounts of another currency`() = runTest {
+    val usd = currencyRepo.getAll(GUEST_OWNER_ID).first()
+    val account = accountRepo.observeActive(GUEST_OWNER_ID).first().first()
+    val gbp = currencyRepo.add(GUEST_OWNER_ID, "GBP", "£", "Pound")
+    val gbpAccount = accountRepo.observeByCurrency(GUEST_OWNER_ID, gbp.id).first().single()
+    val goal = goalRepo.add(GUEST_OWNER_ID, "Trip fund", 5000, usd.id, null)
+
+    val thrown =
+      try {
+        goalRepo.complete(GUEST_OWNER_ID, goal.id, mapOf(account.id to 2500, gbpAccount.id to 2500))
+        null
+      } catch (e: IllegalArgumentException) {
+        e
+      }
+
+    assertTrue(thrown != null)
+    assertTrue(db.goalDao().getById(GUEST_OWNER_ID, goal.id)?.completed == false)
+    assertTrue(db.transactionDao().getByGoal(GUEST_OWNER_ID, goal.id).isEmpty())
+  }
+
+  @Test
+  fun `deleting a goal transaction un-completes the goal and removes its sibling withdrawals`() = runTest {
+    val currency = currencyRepo.getAll(GUEST_OWNER_ID).first()
+    val cash = accountRepo.observeActive(GUEST_OWNER_ID).first().first()
+    val wallet = accountRepo.add(GUEST_OWNER_ID, currency.id, "Wallet")
+    val goal = goalRepo.add(GUEST_OWNER_ID, "Emergency fund", 3000, currency.id, null)
+    goalRepo.complete(GUEST_OWNER_ID, goal.id, mapOf(cash.id to 2000, wallet.id to 1000))
+
+    val created = db.transactionDao().getByGoal(GUEST_OWNER_ID, goal.id)
+    assertEquals(2, created.size)
+    transactionRepo.remove(GUEST_OWNER_ID, created.first().id)
+
+    assertTrue(db.transactionDao().getByGoal(GUEST_OWNER_ID, goal.id).isEmpty())
+    assertTrue(db.goalDao().getById(GUEST_OWNER_ID, goal.id)?.completed == false)
+  }
+
+  @Test
+  fun `deleting a plain transaction does not touch goals`() = runTest {
+    val currency = currencyRepo.getAll(GUEST_OWNER_ID).first()
+    val account = accountRepo.observeActive(GUEST_OWNER_ID).first().first()
+    val goal = goalRepo.add(GUEST_OWNER_ID, "Trip fund", 5000, currency.id, account.id)
+    goalRepo.complete(GUEST_OWNER_ID, goal.id, mapOf(account.id to 5000))
+    val plain =
+      transactionRepo.add(
+        ownerId = GUEST_OWNER_ID,
+        type = TransactionType.EXPENSE,
+        amount = 250,
+        currencyId = currency.id,
+        categoryId = null,
+        accountId = account.id,
+        date = null,
+        title = "Coffee",
+        notes = null,
+        presetId = null,
+      )
+
+    transactionRepo.remove(GUEST_OWNER_ID, plain.id)
+
+    assertTrue(db.goalDao().getById(GUEST_OWNER_ID, goal.id)?.completed == true)
+    assertEquals(1, db.transactionDao().getByGoal(GUEST_OWNER_ID, goal.id).size)
   }
 }

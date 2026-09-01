@@ -29,6 +29,8 @@ data class ThemeSpec(
   val onAccent: Color,
   val income: Color,
   val expense: Color,
+  /** Custom "goal completion" transaction color — metallic gold in every theme. */
+  val goal: Color = Color(0xFFD4AF37),
   val borderWidth: Dp = 1.5.dp,
   val shadowOffset: Dp = 3.dp,
   val cornerRadius: Dp = 0.dp,

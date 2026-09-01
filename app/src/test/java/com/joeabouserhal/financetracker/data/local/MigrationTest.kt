@@ -188,9 +188,27 @@ class MigrationTest {
   }
 
   @Test
-  fun `fresh install DDL matches the exported schema`() {
+  fun `migrate 7 to 8 adds goal_id to transactions`() {
     val db = openVersion(7)
-    assertMatchesExportedSchema(db, 7)
+
+    Migrations.MIGRATION_7_8.migrate(db)
+
+    db.execSQL(
+      "INSERT INTO transactions (id, owner_id, type, amount, currency_id, category_id, account_id, date, title, notes, preset_id, goal_id, created_at, updated_at) " +
+        "VALUES ('tx-1', 'user-1', 'goal', 500, 'cur-1', 'cat-1', NULL, '2026-08-01', 'Trip fund', NULL, NULL, NULL, '2026-08-01T10:00:00Z', '2026-08-01T10:00:00Z')",
+    )
+    db.query("SELECT goal_id FROM transactions WHERE id = 'tx-1'").use { cursor ->
+      assertTrue(cursor.moveToFirst())
+      assertNull(cursor.getString(0))
+    }
+    assertMatchesExportedSchema(db, 8)
+    db.close()
+  }
+
+  @Test
+  fun `fresh install DDL matches the exported schema`() {
+    val db = openVersion(8)
+    assertMatchesExportedSchema(db, 8)
     db.close()
   }
 

@@ -210,7 +210,10 @@ private fun buildReports(
       val currency = currencyById[currencyId] ?: return@mapNotNull null
       fun slices(type: TransactionType): List<CategorySlice> =
         currencyItems
-          .filter { it.transaction.type == type }
+          .filter {
+            it.transaction.type == type ||
+              (type == TransactionType.EXPENSE && it.transaction.type == TransactionType.GOAL)
+          }
           .groupBy { it.categoryName to it.categoryColor }
           .map { (key, group) ->
             CategorySlice(
@@ -227,7 +230,12 @@ private fun buildReports(
         name = currency.name,
         symbol = currency.symbol,
         incomeMinor = currencyItems.filter { it.transaction.type == TransactionType.INCOME }.sumOf { it.transaction.amount },
-        expenseMinor = currencyItems.filter { it.transaction.type == TransactionType.EXPENSE }.sumOf { it.transaction.amount },
+        expenseMinor =
+          currencyItems
+            .filter {
+              it.transaction.type == TransactionType.EXPENSE || it.transaction.type == TransactionType.GOAL
+            }
+            .sumOf { it.transaction.amount },
         expenseSlices = slices(TransactionType.EXPENSE),
         incomeSlices = slices(TransactionType.INCOME),
         count = currencyItems.size,

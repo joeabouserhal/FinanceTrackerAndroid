@@ -36,7 +36,7 @@ import com.joeabouserhal.financetracker.data.local.entities.TransactionEntity
       OutboxEntity::class,
       SyncMetaEntity::class,
     ],
-  version = 7,
+  version = 8,
   exportSchema = true,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -146,5 +146,14 @@ object Migrations {
       }
     }
 
-  val ALL: Array<Migration> = arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7)
+  val MIGRATION_7_8 =
+    object : Migration(7, 8) {
+      override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE `transactions` ADD COLUMN `goal_id` TEXT DEFAULT NULL REFERENCES `goals`(`id`) ON UPDATE NO ACTION ON DELETE SET NULL")
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_transactions_goal_id` ON `transactions` (`goal_id`)")
+      }
+    }
+
+  val ALL: Array<Migration> =
+    arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8)
 }

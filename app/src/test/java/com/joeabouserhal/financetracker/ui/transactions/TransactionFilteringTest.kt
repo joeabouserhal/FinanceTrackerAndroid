@@ -34,6 +34,7 @@ class TransactionFilteringTest {
         title = title,
         notes = notes,
         presetId = null,
+        goalId = null,
         createdAt = createdAt,
         updatedAt = createdAt,
       ),
@@ -54,6 +55,20 @@ class TransactionFilteringTest {
   fun `type filter`() {
     val result = TransactionFiltering.apply(items, TransactionFilterState(type = TypeFilter.INCOME))
     assertEquals(listOf("t1"), result.map { it.transaction.id })
+  }
+
+  @Test
+  fun `expense type filter also matches goal withdrawals`() {
+    val goalItem = item("t4", TransactionType.GOAL, 400, "2026-08-04", categoryId = "cat-b", accountId = "acc-b", title = "Trip fund")
+    val withGoal = items + goalItem
+    assertEquals(
+      setOf("t4", "t3", "t2"),
+      TransactionFiltering.apply(withGoal, TransactionFilterState(type = TypeFilter.EXPENSE)).map { it.transaction.id }.toSet(),
+    )
+    assertEquals(
+      listOf("t1"),
+      TransactionFiltering.apply(withGoal, TransactionFilterState(type = TypeFilter.INCOME)).map { it.transaction.id },
+    )
   }
 
   @Test

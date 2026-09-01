@@ -14,10 +14,30 @@ class CategoryRepository(
   private val dao: CategoryDao,
   private val db: AppDatabase,
 ) {
+  companion object {
+    /** Goal withdrawals use this dedicated category instead of "Other". */
+    const val GOAL_CATEGORY_NAME = "Goal"
+
+    /** Matches the golden GOAL transaction styling (#D4AF37). */
+    const val GOAL_CATEGORY_COLOR = "#D4AF37"
+  }
+
   fun observeByType(ownerId: String, type: TransactionType): Flow<List<CategoryEntity>> =
     dao.observeByType(ownerId, type)
 
   fun observeAll(ownerId: String): Flow<List<CategoryEntity>> = dao.observeAll(ownerId)
+
+  /**
+   * The custom "Goal" expense category used by goal-completion transactions.
+   * Created on first use and reused afterwards (also reuses a user-created
+   * category with the same name).
+   */
+  suspend fun ensureGoalCategory(ownerId: String): CategoryEntity {
+    val existing =
+      dao.getAll(ownerId).firstOrNull { it.type == TransactionType.EXPENSE && it.name == GOAL_CATEGORY_NAME }
+    if (existing != null) return existing
+    return add(ownerId, GOAL_CATEGORY_NAME, TransactionType.EXPENSE, GOAL_CATEGORY_COLOR)
+  }
 
   suspend fun add(ownerId: String, name: String, type: TransactionType, color: String): CategoryEntity {
     require(name.trim().isNotBlank()) { "Category name is required" }

@@ -50,7 +50,8 @@ fun CompletedGoalsScreen(
       container.goalRepository.observeAll(ownerId),
       container.transactionRepository.observeAll(ownerId),
       container.currencyRepository.observeAll(ownerId),
-      container.accountRepository.observeActive(ownerId),
+      // All accounts so archived-account goals keep their real scope label.
+      container.accountRepository.observeAll(ownerId),
     ) { goals, transactions, currencies, accounts ->
       buildProgress(goals, transactions, currencies, accounts).filter { it.goal.completed }
     }

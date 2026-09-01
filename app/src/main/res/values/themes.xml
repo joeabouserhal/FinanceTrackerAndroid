@@ -2,4 +2,13 @@
 <resources>
 
     <style name="Theme.FinanceTracker" parent="android:Theme.Material.Light.NoActionBar" />
+
+    <!-- Cold-start splash: white logo on the app's dark brutalist background.
+         Theme.SplashScreen comes from androidx.core:core-splashscreen and
+         hands off to the regular app theme once the first frame is ready. -->
+    <style name="Theme.FinanceTracker.Starting" parent="Theme.SplashScreen">
+        <item name="windowSplashScreenBackground">@color/splash_background</item>
+        <item name="windowSplashScreenAnimatedIcon">@drawable/ic_splash_logo</item>
+        <item name="postSplashScreenTheme">@style/Theme.FinanceTracker</item>
+    </style>
 </resources>
