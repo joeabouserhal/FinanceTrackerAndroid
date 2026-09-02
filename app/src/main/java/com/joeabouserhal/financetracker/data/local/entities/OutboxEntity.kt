@@ -4,6 +4,7 @@ import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.Index
 import androidx.room.PrimaryKey
+import java.util.UUID
 
 /** Offline-first mutation queue. Payload is serialized JSON. */
 @Entity(
@@ -12,6 +13,7 @@ import androidx.room.PrimaryKey
 )
 data class OutboxEntity(
   @PrimaryKey(autoGenerate = true) val id: Long = 0,
+  @ColumnInfo(name = "op_id") val opId: String = UUID.randomUUID().toString(),
   @ColumnInfo(name = "owner_id") val ownerId: String,
   @ColumnInfo(name = "table_name") val tableName: String,
   val action: OutboxAction,

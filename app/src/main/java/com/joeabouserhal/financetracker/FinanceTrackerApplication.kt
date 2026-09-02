@@ -3,6 +3,7 @@ package com.joeabouserhal.financetracker
 import android.app.Application
 import com.joeabouserhal.financetracker.data.local.GUEST_OWNER_ID
 import com.joeabouserhal.financetracker.data.local.seed.GuestSeeder
+import com.joeabouserhal.financetracker.data.sync.SyncVersion
 import com.joeabouserhal.financetracker.di.AppContainer
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.first
@@ -14,6 +15,7 @@ class FinanceTrackerApplication : Application() {
 
   override fun onCreate() {
     super.onCreate()
+    SyncVersion.initialize(this)
     container = AppContainer(this)
 
     // Seed the guest partition once; this does not change the active owner.

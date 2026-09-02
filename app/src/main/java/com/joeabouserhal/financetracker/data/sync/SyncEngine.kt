@@ -1,6 +1,7 @@
 package com.joeabouserhal.financetracker.data.sync
 
 import android.util.Log
+import androidx.room.withTransaction
 import com.joeabouserhal.financetracker.data.local.AppDatabase
 import com.joeabouserhal.financetracker.data.local.dao.SyncMetaDao
 import com.joeabouserhal.financetracker.data.local.entities.OutboxAction
@@ -9,6 +10,8 @@ import com.joeabouserhal.financetracker.data.local.entities.SyncMetaEntity
 import com.joeabouserhal.financetracker.data.session.Session
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -48,6 +51,7 @@ class SyncEngine(
   private val api: SyncApi?,
 ) {
   private val syncMeta: SyncMetaDao = db.syncMetaDao()
+  private val syncMutex = Mutex()
 
   companion object {
     private const val TAG = "SyncEngine"
@@ -59,7 +63,10 @@ class SyncEngine(
   /** Last completed sync outcome — surfaced in Options as sync health. */
   val latestOutcome = kotlinx.coroutines.flow.MutableStateFlow<SyncOutcome.Completed?>(null)
 
-  suspend fun sync(): SyncOutcome {
+  /** Periodic and foreground workers share this gate so they cannot race the outbox. */
+  suspend fun sync(): SyncOutcome = syncMutex.withLock { syncOnce() }
+
+  private suspend fun syncOnce(): SyncOutcome {
     val current = session.first()
     if (current.isGuest) return SyncOutcome.Skipped(SyncOutcome.SkipReason.GUEST)
     val syncApi = api ?: return SyncOutcome.Skipped(SyncOutcome.SkipReason.NOT_CONFIGURED)
@@ -106,15 +113,7 @@ class SyncEngine(
 
   private suspend fun pushOp(api: SyncApi, op: OutboxEntity, spec: SyncTables.Spec) {
     val payload = Json.parseToJsonElement(op.payloadJson).jsonObject
-    when (op.action) {
-      OutboxAction.INSERT, OutboxAction.UPDATE -> api.upsert(op.tableName, payload, spec.conflictColumn)
-      OutboxAction.DELETE -> {
-        val id =
-          (payload[spec.keyColumn] as? JsonPrimitive)?.contentOrNull
-            ?: throw IllegalArgumentException("DELETE op for ${spec.name} has no ${spec.keyColumn}")
-        api.deleteById(op.tableName, spec.keyColumn, id)
-      }
-    }
+    api.applyMutation(op.tableName, op.action, payload, spec.keyColumn, spec.conflictColumn, op.opId)
   }
 
   /** Returns the number of rows pulled. Advances the watermark only on success. */
@@ -127,7 +126,8 @@ class SyncEngine(
     while (true) {
       val page = api.pullRows(spec.name, ownerId, cursorTs, cursorId, SyncApi.DEFAULT_PAGE_SIZE, spec.keyColumn)
       if (page.isEmpty()) break
-      applyRows(ownerId, spec.name, page)
+      // A page is a transaction: never advance past a row we could not apply.
+      db.withTransaction { applyRows(ownerId, spec.name, page) }
       pulled += page.size
       val last = page.last()
       cursorTs = last.req("updated_at")
@@ -143,13 +143,13 @@ class SyncEngine(
 
   private suspend fun applyRows(ownerId: String, table: String, rows: List<JsonObject>) {
     when (table) {
-      "currencies" -> rows.forEach { row -> safe { applyCurrency(ownerId, SyncMappers.currency(row)) } }
-      "categories" -> rows.forEach { row -> safe { applyCategory(ownerId, SyncMappers.category(row)) } }
-      "accounts" -> rows.forEach { row -> safe { applyAccount(ownerId, SyncMappers.account(row)) } }
-      "presets" -> rows.forEach { row -> safe { applyPreset(ownerId, SyncMappers.preset(row)) } }
-      "goals" -> rows.forEach { row -> safe { applyGoal(ownerId, SyncMappers.goal(row)) } }
-      "transactions" -> rows.forEach { row -> safe { applyTransaction(ownerId, SyncMappers.transaction(row)) } }
-      "profiles" -> rows.forEach { row -> safe { applyProfile(ownerId, SyncMappers.profile(row)) } }
+      "currencies" -> rows.forEach { row -> applyCurrency(ownerId, SyncMappers.currency(row)) }
+      "categories" -> rows.forEach { row -> applyCategory(ownerId, SyncMappers.category(row)) }
+      "accounts" -> rows.forEach { row -> applyAccount(ownerId, SyncMappers.account(row)) }
+      "presets" -> rows.forEach { row -> applyPreset(ownerId, SyncMappers.preset(row)) }
+      "goals" -> rows.forEach { row -> applyGoal(ownerId, SyncMappers.goal(row)) }
+      "transactions" -> rows.forEach { row -> applyTransaction(ownerId, SyncMappers.transaction(row)) }
+      "profiles" -> rows.forEach { row -> applyProfile(ownerId, SyncMappers.profile(row)) }
       else -> throw IllegalArgumentException("Unknown sync table '$table'")
     }
   }
@@ -159,8 +159,7 @@ class SyncEngine(
     val local = dao.getById(ownerId, remote.id)
     when {
       local == null -> dao.insertAll(listOf(remote))
-      SyncMappers.remoteAtLeastAsNew(local.updatedAt, remote.updatedAt) ->
-        dao.updateFromSync(ownerId, remote.id, remote.code, remote.symbol, remote.name, remote.isDefault, remote.updatedAt)
+      SyncMappers.remoteAtLeastAsNew(local.syncVersion, remote.syncVersion) -> dao.replaceFromSync(remote)
     }
   }
 
@@ -169,8 +168,7 @@ class SyncEngine(
     val local = dao.getById(ownerId, remote.id)
     when {
       local == null -> dao.insertAll(listOf(remote))
-      SyncMappers.remoteAtLeastAsNew(local.updatedAt, remote.updatedAt) ->
-        dao.updateFromSync(ownerId, remote.id, remote.name, remote.type, remote.color, remote.isDefault, remote.updatedAt)
+      SyncMappers.remoteAtLeastAsNew(local.syncVersion, remote.syncVersion) -> dao.replaceFromSync(remote)
     }
   }
 
@@ -182,8 +180,8 @@ class SyncEngine(
         dao.insertAll(listOf(remote))
         if (remote.isDefault) dao.clearDefaultExceptForCurrency(ownerId, remote.currencyId, remote.id)
       }
-      SyncMappers.remoteAtLeastAsNew(local.updatedAt, remote.updatedAt) -> {
-        dao.updateFromSync(ownerId, remote.id, remote.currencyId, remote.name, remote.archived, remote.isDefault, remote.updatedAt)
+      SyncMappers.remoteAtLeastAsNew(local.syncVersion, remote.syncVersion) -> {
+        dao.replaceFromSync(remote)
         if (remote.isDefault) dao.clearDefaultExceptForCurrency(ownerId, remote.currencyId, remote.id)
       }
     }
@@ -194,19 +192,7 @@ class SyncEngine(
     val local = dao.getById(ownerId, remote.id)
     when {
       local == null -> dao.insertAll(listOf(remote))
-      SyncMappers.remoteAtLeastAsNew(local.updatedAt, remote.updatedAt) ->
-        dao.updateFromSync(
-          ownerId,
-          remote.id,
-          remote.name,
-          remote.type,
-          remote.defaultAmount,
-          remote.defaultCurrencyId,
-          remote.defaultCategoryId,
-          remote.defaultAccountId,
-          remote.archived,
-          remote.updatedAt,
-        )
+      SyncMappers.remoteAtLeastAsNew(local.syncVersion, remote.syncVersion) -> dao.replaceFromSync(remote)
     }
   }
 
@@ -215,17 +201,7 @@ class SyncEngine(
     val local = dao.getById(ownerId, remote.id)
     when {
       local == null -> dao.insertAll(listOf(remote))
-      SyncMappers.remoteAtLeastAsNew(local.updatedAt, remote.updatedAt) ->
-        dao.updateFromSync(
-          ownerId,
-          remote.id,
-          remote.name,
-          remote.targetMinor,
-          remote.currencyId,
-          remote.accountId,
-          remote.completed,
-          remote.updatedAt,
-        )
+      SyncMappers.remoteAtLeastAsNew(local.syncVersion, remote.syncVersion) -> dao.replaceFromSync(remote)
     }
   }
 
@@ -234,22 +210,7 @@ class SyncEngine(
     val local = dao.getById(ownerId, remote.id)
     when {
       local == null -> dao.insertAll(listOf(remote))
-      SyncMappers.remoteAtLeastAsNew(local.updatedAt, remote.updatedAt) ->
-        dao.update(
-          ownerId,
-          remote.id,
-          remote.type,
-          remote.amount,
-          remote.currencyId,
-          remote.categoryId,
-          remote.accountId,
-          remote.date,
-          remote.title,
-          remote.notes,
-          remote.presetId,
-          remote.goalId,
-          remote.updatedAt,
-        )
+      SyncMappers.remoteAtLeastAsNew(local.syncVersion, remote.syncVersion) -> dao.replaceFromSync(remote)
     }
   }
 
@@ -258,16 +219,7 @@ class SyncEngine(
     val local = dao.get(ownerId)
     when {
       local == null -> dao.upsert(remote)
-      SyncMappers.remoteAtLeastAsNew(local.updatedAt, remote.updatedAt) -> dao.upsert(remote)
-    }
-  }
-
-  private suspend inline fun safe(block: suspend () -> Unit) {
-    try {
-      block()
-    } catch (_: Exception) {
-      // Skip the malformed/FK-broken row this run; it stays behind the
-      // watermark and is retried on the next sync.
+      SyncMappers.remoteAtLeastAsNew(local.syncVersion, remote.syncVersion) -> dao.replaceFromSync(remote)
     }
   }
 

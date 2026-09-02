@@ -9,6 +9,7 @@ import com.joeabouserhal.financetracker.data.local.entities.OutboxEntity
 import com.joeabouserhal.financetracker.data.local.entities.PresetEntity
 import com.joeabouserhal.financetracker.data.local.entities.ProfileEntity
 import com.joeabouserhal.financetracker.data.local.entities.TransactionEntity
+import com.joeabouserhal.financetracker.data.sync.SyncVersion
 import java.time.Instant
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
@@ -51,7 +52,7 @@ object OutboxWriter {
 
   fun currency(ownerId: String, e: CurrencyEntity): JsonObject =
     merge(
-      base(e.id, ownerId),
+      base(e.id, ownerId, e.createdAt, e.syncVersion, e.deletedAt),
       json(
         "code" to JsonPrimitive(e.code),
         "symbol" to JsonPrimitive(e.symbol),
@@ -62,7 +63,7 @@ object OutboxWriter {
 
   fun category(ownerId: String, e: CategoryEntity): JsonObject =
     merge(
-      base(e.id, ownerId),
+      base(e.id, ownerId, e.createdAt, e.syncVersion, e.deletedAt),
       json(
         "name" to JsonPrimitive(e.name),
         "type" to JsonPrimitive(e.type.name.lowercase()),
@@ -73,7 +74,7 @@ object OutboxWriter {
 
   fun account(ownerId: String, e: AccountEntity): JsonObject =
     merge(
-      base(e.id, ownerId),
+      base(e.id, ownerId, e.createdAt, e.syncVersion, e.deletedAt),
       json(
         "currency_id" to JsonPrimitive(e.currencyId),
         "name" to JsonPrimitive(e.name),
@@ -84,7 +85,7 @@ object OutboxWriter {
 
   fun goal(ownerId: String, e: GoalEntity): JsonObject =
     merge(
-      base(e.id, ownerId),
+      base(e.id, ownerId, e.createdAt, e.syncVersion, e.deletedAt),
       json(
         "name" to JsonPrimitive(e.name),
         "target_minor" to JsonPrimitive(e.targetMinor),
@@ -96,7 +97,7 @@ object OutboxWriter {
 
   fun preset(ownerId: String, e: PresetEntity): JsonObject =
     merge(
-      base(e.id, ownerId),
+      base(e.id, ownerId, e.createdAt, e.syncVersion, e.deletedAt),
       json(
         "name" to JsonPrimitive(e.name),
         "type" to JsonPrimitive(e.type.name.lowercase()),
@@ -110,7 +111,7 @@ object OutboxWriter {
 
   fun transaction(ownerId: String, e: TransactionEntity): JsonObject =
     merge(
-      base(e.id, ownerId),
+      base(e.id, ownerId, e.createdAt, e.syncVersion, e.deletedAt),
       json(
         "type" to JsonPrimitive(e.type.name.lowercase()),
         "amount" to JsonPrimitive(e.amount),
@@ -130,15 +131,24 @@ object OutboxWriter {
       "user_id" to JsonPrimitive(ownerId),
       "name" to JsonPrimitive(e.name),
       "created_at" to JsonPrimitive(e.createdAt),
+      "sync_version" to JsonPrimitive(SyncVersion.next()),
     )
 
-  fun deletePayload(id: String): JsonObject = json("id" to JsonPrimitive(id))
+  fun deletePayload(id: String): JsonObject =
+    json(
+      "id" to JsonPrimitive(id),
+      "sync_version" to JsonPrimitive(SyncVersion.next()),
+      "deleted_at" to JsonPrimitive(Instant.now().toString()),
+    )
 
-  private fun base(id: String, ownerId: String): JsonObject =
+  /** `created_at` belongs to the entity, never to the enqueue moment. */
+  private fun base(id: String, ownerId: String, createdAt: String, syncVersion: String, deletedAt: String?): JsonObject =
     json(
       "id" to JsonPrimitive(id),
       "user_id" to JsonPrimitive(ownerId),
-      "created_at" to JsonPrimitive(Instant.now().toString()),
+      "created_at" to JsonPrimitive(createdAt),
+      "sync_version" to JsonPrimitive(SyncVersion.next()),
+      "deleted_at" to (deletedAt?.let { JsonPrimitive(it) } ?: JsonNull),
     )
 
   private fun merge(a: JsonObject, b: JsonObject): JsonObject = JsonObject(a.toMap() + b.toMap())

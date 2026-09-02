@@ -9,9 +9,11 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -54,20 +56,22 @@ fun TransactionRow(
   Row(
     modifier
       .fillMaxWidth()
+      .background(spec.surface)
       .minimumInteractiveComponentSize()
       .clickable(onClick = onPress)
-      .padding(vertical = 10.dp),
+      .padding(horizontal = 12.dp, vertical = 11.dp),
     verticalAlignment = Alignment.CenterVertically,
   ) {
     Box(
       Modifier
-        .size(12.dp)
+        .width(3.dp)
+        .height(40.dp)
         .background(if (isGoal) spec.goal else parseColor(item.categoryColor)),
     )
     Column(
       Modifier
         .weight(1f)
-        .padding(horizontal = 12.dp),
+        .padding(horizontal = 11.dp),
       verticalArrangement = Arrangement.spacedBy(2.dp),
     ) {
       Text(

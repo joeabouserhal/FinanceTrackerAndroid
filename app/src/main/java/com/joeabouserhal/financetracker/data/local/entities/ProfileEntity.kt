@@ -11,4 +11,5 @@ data class ProfileEntity(
   val name: String,
   @ColumnInfo(name = "updated_at") val updatedAt: String,
   @ColumnInfo(name = "created_at", defaultValue = "''") val createdAt: String,
+  @ColumnInfo(name = "sync_version", defaultValue = "''") val syncVersion: String = updatedAt,
 )

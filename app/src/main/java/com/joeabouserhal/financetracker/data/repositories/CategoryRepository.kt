@@ -94,7 +94,9 @@ class CategoryRepository(
       val now = java.time.Instant.now().toString()
       val affected = db.transactionDao().getAll(ownerId).filter { it.categoryId == id }
       dao.reassignTransactions(ownerId, id, other.id, now)
-      dao.delete(ownerId, id)
+      val deletedAt = java.time.Instant.now().toString()
+      if (ownerId == com.joeabouserhal.financetracker.data.local.GUEST_OWNER_ID) dao.delete(ownerId, id)
+      else dao.delete(ownerId, id, deletedAt, com.joeabouserhal.financetracker.data.sync.SyncVersion.next())
       OutboxWriter.enqueue(db, ownerId, "categories", OutboxAction.DELETE, OutboxWriter.deletePayload(id))
       affected.forEach { tx ->
         val updated = tx.copy(categoryId = other.id, updatedAt = now)

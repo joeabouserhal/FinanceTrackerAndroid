@@ -4,37 +4,38 @@ import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import androidx.room.Update
 import com.joeabouserhal.financetracker.data.local.entities.TransactionEntity
 import com.joeabouserhal.financetracker.data.local.entities.TransactionType
 import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface TransactionDao {
-  @Query("SELECT * FROM transactions WHERE owner_id = :ownerId ORDER BY date DESC, created_at DESC")
+  @Query("SELECT * FROM transactions WHERE owner_id = :ownerId AND deleted_at IS NULL ORDER BY date DESC, created_at DESC")
   fun observeAll(ownerId: String): Flow<List<TransactionEntity>>
 
   @Query(
     """
     SELECT * FROM transactions
-    WHERE owner_id = :ownerId AND date >= :dateFrom AND date <= :dateTo
+    WHERE owner_id = :ownerId AND deleted_at IS NULL AND date >= :dateFrom AND date <= :dateTo
     ORDER BY date DESC, created_at DESC
     """
   )
   fun observeBetween(ownerId: String, dateFrom: String, dateTo: String): Flow<List<TransactionEntity>>
 
-  @Query("SELECT * FROM transactions WHERE owner_id = :ownerId ORDER BY date DESC, created_at DESC LIMIT :limit")
+  @Query("SELECT * FROM transactions WHERE owner_id = :ownerId AND deleted_at IS NULL ORDER BY date DESC, created_at DESC LIMIT :limit")
   fun observeRecent(ownerId: String, limit: Int): Flow<List<TransactionEntity>>
 
-  @Query("SELECT * FROM transactions WHERE owner_id = :ownerId")
+  @Query("SELECT * FROM transactions WHERE owner_id = :ownerId AND deleted_at IS NULL")
   suspend fun getAll(ownerId: String): List<TransactionEntity>
 
   @Query("SELECT * FROM transactions WHERE owner_id = :ownerId AND id = :id")
   suspend fun getById(ownerId: String, id: String): TransactionEntity?
 
-  @Query("SELECT * FROM transactions WHERE owner_id = :ownerId AND goal_id = :goalId")
+  @Query("SELECT * FROM transactions WHERE owner_id = :ownerId AND deleted_at IS NULL AND goal_id = :goalId")
   suspend fun getByGoal(ownerId: String, goalId: String): List<TransactionEntity>
 
-  @Query("SELECT COUNT(*) FROM transactions WHERE owner_id = :ownerId AND account_id = :accountId")
+  @Query("SELECT COUNT(*) FROM transactions WHERE owner_id = :ownerId AND deleted_at IS NULL AND account_id = :accountId")
   suspend fun countByAccount(ownerId: String, accountId: String): Int
 
   @Insert(onConflict = OnConflictStrategy.REPLACE)
@@ -46,6 +47,9 @@ interface TransactionDao {
   /** Sync pull inserts: never replace (REPLACE cascades to child tables). */
   @Insert(onConflict = OnConflictStrategy.IGNORE)
   suspend fun insertAll(entities: List<TransactionEntity>)
+
+  @Update
+  suspend fun replaceFromSync(entity: TransactionEntity)
 
   @Query(
     """
@@ -71,6 +75,9 @@ interface TransactionDao {
     goalId: String?,
     updatedAt: String,
   )
+
+  @Query("UPDATE transactions SET deleted_at = :deletedAt, updated_at = :deletedAt, sync_version = :syncVersion WHERE owner_id = :ownerId AND id = :id")
+  suspend fun delete(ownerId: String, id: String, deletedAt: String, syncVersion: String)
 
   @Query("DELETE FROM transactions WHERE owner_id = :ownerId AND id = :id")
   suspend fun delete(ownerId: String, id: String)

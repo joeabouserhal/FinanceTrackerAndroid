@@ -139,12 +139,23 @@ fun ReportScreen(modifier: Modifier = Modifier) {
       Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
       verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-      BrButton(
-        text = if (activeCount > 0) "FILTERS ($activeCount)" else "FILTERS",
-        onClick = { filtersOpen = !filtersOpen },
-        style = if (filtersOpen || activeCount > 0) BrButtonStyle.SOLID else BrButtonStyle.OUTLINE,
-        modifier = Modifier.fillMaxWidth(),
-      )
+      Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+        BrSegmentedToggle(
+          options = listOf("SPENDING", "EARNING"),
+          selectedIndex = if (viewType == TransactionType.EXPENSE) 0 else 1,
+          onSelect = { viewType = if (it == 0) TransactionType.EXPENSE else TransactionType.INCOME },
+          optionColors = listOf(spec.expense, spec.income),
+          modifier = Modifier.weight(1f),
+        )
+        BrButton(
+          text = if (activeCount > 0) "FILTER $activeCount" else "FILTER",
+          onClick = { filtersOpen = !filtersOpen },
+          style = if (filtersOpen || activeCount > 0) BrButtonStyle.SOLID else BrButtonStyle.OUTLINE,
+          compact = true,
+          fillWidth = false,
+          minHeight = 48.dp,
+        )
+      }
     }
 
     AnimatedVisibility(
@@ -153,19 +164,6 @@ fun ReportScreen(modifier: Modifier = Modifier) {
       exit = shrinkVertically(tween(150)) + fadeOut(tween(150)),
     ) {
       Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        // View toggle lives inside the expanded filter area.
-        Column(
-          Modifier.fillMaxWidth().padding(horizontal = 16.dp),
-          verticalArrangement = Arrangement.spacedBy(6.dp),
-        ) {
-          Text("VIEW", style = MaterialTheme.typography.labelSmall, color = spec.muted)
-          BrSegmentedToggle(
-            options = listOf("SPENDING", "EARNING"),
-            selectedIndex = if (viewType == TransactionType.EXPENSE) 0 else 1,
-            onSelect = { viewType = if (it == 0) TransactionType.EXPENSE else TransactionType.INCOME },
-            optionColors = listOf(spec.expense, spec.income),
-          )
-        }
         FilterPanel(
           filters = filters,
           onFiltersChange = { filters = it },
@@ -347,9 +345,9 @@ private fun DonutChart(
   color: androidx.compose.ui.graphics.Color,
 ) {
   val spec = LocalThemeSpec.current
-  Box(Modifier.fillMaxWidth().height(220.dp), contentAlignment = Alignment.Center) {
-    Canvas(Modifier.size(200.dp)) {
-      val strokeWidth = 30.dp.toPx()
+  Box(Modifier.fillMaxWidth().height(196.dp), contentAlignment = Alignment.Center) {
+    Canvas(Modifier.size(178.dp)) {
+      val strokeWidth = 24.dp.toPx()
       val inset = strokeWidth / 2f + 2.dp.toPx()
       val arcSize = Size(size.width - inset * 2, size.height - inset * 2)
       val topLeft = Offset(inset, inset)

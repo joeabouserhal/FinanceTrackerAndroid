@@ -43,6 +43,8 @@ CREATE TABLE currencies (
   is_default  BOOLEAN DEFAULT false,
   created_at  TIMESTAMPTZ DEFAULT now(),
   updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  sync_version TEXT NOT NULL DEFAULT '',
+  deleted_at  TIMESTAMPTZ,
   UNIQUE(user_id, code)
 );
 
@@ -55,7 +57,9 @@ CREATE TABLE categories (
   color       VARCHAR(7) NOT NULL,             -- hex e.g. '#4C9A63'
   is_default  BOOLEAN DEFAULT false,           -- seeded at signup vs user-created
   created_at  TIMESTAMPTZ DEFAULT now(),
-  updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+  updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  sync_version TEXT NOT NULL DEFAULT '',
+  deleted_at TIMESTAMPTZ
 );
 
 -- Accounts — each belongs to ONE currency
@@ -65,8 +69,11 @@ CREATE TABLE accounts (
   currency_id UUID NOT NULL REFERENCES currencies(id) ON DELETE CASCADE,
   name        VARCHAR(100) NOT NULL,           -- e.g. 'Cash', 'Card'
   archived    BOOLEAN DEFAULT false,
+  is_default  BOOLEAN NOT NULL DEFAULT false,
   created_at  TIMESTAMPTZ DEFAULT now(),
-  updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+  updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  sync_version TEXT NOT NULL DEFAULT '',
+  deleted_at  TIMESTAMPTZ
 );
 
 -- Presets — quick-fill templates for the add-transaction form
@@ -81,7 +88,9 @@ CREATE TABLE presets (
   default_account_id    UUID REFERENCES accounts(id) ON DELETE SET NULL,
   archived              BOOLEAN DEFAULT false,
   created_at            TIMESTAMPTZ DEFAULT now(),
-  updated_at            TIMESTAMPTZ NOT NULL DEFAULT now()
+  updated_at            TIMESTAMPTZ NOT NULL DEFAULT now(),
+  sync_version          TEXT NOT NULL DEFAULT '',
+  deleted_at            TIMESTAMPTZ
 );
 
 -- Transactions — the core record
@@ -98,7 +107,9 @@ CREATE TABLE transactions (
   notes         TEXT,
   preset_id     UUID REFERENCES presets(id) ON DELETE SET NULL,
   created_at    TIMESTAMPTZ DEFAULT now(),
-  updated_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+  updated_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  sync_version  TEXT NOT NULL DEFAULT '',
+  deleted_at    TIMESTAMPTZ
 );
 
 -- Display name + account creation date per user (matches the app's local `profiles` table).
@@ -106,7 +117,8 @@ CREATE TABLE profiles (
   user_id     UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
   name        VARCHAR(100) NOT NULL,
   created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
-  updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+  updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  sync_version TEXT NOT NULL DEFAULT ''
 );
 
 -- =============================================================================
@@ -123,6 +135,11 @@ CREATE INDEX idx_transactions_currency_id  ON transactions(currency_id);
 CREATE INDEX idx_transactions_category_id  ON transactions(category_id);
 CREATE INDEX idx_transactions_account_id   ON transactions(account_id);
 CREATE INDEX idx_transactions_preset_id    ON transactions(preset_id);
+CREATE INDEX idx_currencies_sync_cursor    ON currencies(user_id, updated_at, id);
+CREATE INDEX idx_categories_sync_cursor    ON categories(user_id, updated_at, id);
+CREATE INDEX idx_accounts_sync_cursor      ON accounts(user_id, updated_at, id);
+CREATE INDEX idx_presets_sync_cursor       ON presets(user_id, updated_at, id);
+CREATE INDEX idx_transactions_sync_cursor  ON transactions(user_id, updated_at, id);
 
 -- =============================================================================
 -- 3. Row Level Security
@@ -177,12 +194,12 @@ BEGIN
 END;
 $$;
 
-CREATE TRIGGER set_currencies_updated_at   BEFORE UPDATE ON currencies   FOR EACH ROW EXECUTE FUNCTION touch_updated_at();
-CREATE TRIGGER set_categories_updated_at   BEFORE UPDATE ON categories   FOR EACH ROW EXECUTE FUNCTION touch_updated_at();
-CREATE TRIGGER set_accounts_updated_at     BEFORE UPDATE ON accounts     FOR EACH ROW EXECUTE FUNCTION touch_updated_at();
-CREATE TRIGGER set_presets_updated_at      BEFORE UPDATE ON presets      FOR EACH ROW EXECUTE FUNCTION touch_updated_at();
-CREATE TRIGGER set_transactions_updated_at BEFORE UPDATE ON transactions FOR EACH ROW EXECUTE FUNCTION touch_updated_at();
-CREATE TRIGGER set_profiles_updated_at     BEFORE UPDATE ON profiles     FOR EACH ROW EXECUTE FUNCTION touch_updated_at();
+CREATE TRIGGER set_currencies_updated_at   BEFORE INSERT OR UPDATE ON currencies   FOR EACH ROW EXECUTE FUNCTION touch_updated_at();
+CREATE TRIGGER set_categories_updated_at   BEFORE INSERT OR UPDATE ON categories   FOR EACH ROW EXECUTE FUNCTION touch_updated_at();
+CREATE TRIGGER set_accounts_updated_at     BEFORE INSERT OR UPDATE ON accounts     FOR EACH ROW EXECUTE FUNCTION touch_updated_at();
+CREATE TRIGGER set_presets_updated_at      BEFORE INSERT OR UPDATE ON presets      FOR EACH ROW EXECUTE FUNCTION touch_updated_at();
+CREATE TRIGGER set_transactions_updated_at BEFORE INSERT OR UPDATE ON transactions FOR EACH ROW EXECUTE FUNCTION touch_updated_at();
+CREATE TRIGGER set_profiles_updated_at     BEFORE INSERT OR UPDATE ON profiles     FOR EACH ROW EXECUTE FUNCTION touch_updated_at();
 
 -- =============================================================================
 -- 6. Signup trigger — seed default data
@@ -201,8 +218,8 @@ BEGIN
   VALUES (NEW.id, 'USD', '$', 'US Dollar', true)
   RETURNING id INTO v_currency_id;
 
-  INSERT INTO public.accounts (user_id, currency_id, name)
-  VALUES (NEW.id, v_currency_id, 'Cash');
+  INSERT INTO public.accounts (user_id, currency_id, name, is_default)
+  VALUES (NEW.id, v_currency_id, 'Cash', true);
 
   INSERT INTO public.profiles (user_id, name)
   VALUES (NEW.id, 'You');

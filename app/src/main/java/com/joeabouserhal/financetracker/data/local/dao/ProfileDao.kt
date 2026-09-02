@@ -4,6 +4,7 @@ import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import androidx.room.Update
 import com.joeabouserhal.financetracker.data.local.entities.ProfileEntity
 import kotlinx.coroutines.flow.Flow
 
@@ -17,6 +18,9 @@ interface ProfileDao {
 
   @Insert(onConflict = OnConflictStrategy.REPLACE)
   suspend fun upsert(entity: ProfileEntity)
+
+  @Update
+  suspend fun replaceFromSync(entity: ProfileEntity)
 
   @Query("DELETE FROM profiles WHERE owner_id = :ownerId")
   suspend fun delete(ownerId: String)

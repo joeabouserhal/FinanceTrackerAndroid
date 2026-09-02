@@ -36,7 +36,7 @@ import com.joeabouserhal.financetracker.data.local.entities.TransactionEntity
       OutboxEntity::class,
       SyncMetaEntity::class,
     ],
-  version = 8,
+  version = 10,
   exportSchema = true,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -154,6 +154,32 @@ object Migrations {
       }
     }
 
+  /** Sync protocol metadata. Tombstones are hidden by DAO queries, never hard-deleted. */
+  val MIGRATION_8_9 =
+    object : Migration(8, 9) {
+      override fun migrate(db: SupportSQLiteDatabase) {
+        val tombstoned = arrayOf("currencies", "categories", "accounts", "presets", "goals", "transactions")
+        tombstoned.forEach { table ->
+          db.execSQL("ALTER TABLE `$table` ADD COLUMN `sync_version` TEXT NOT NULL DEFAULT ''")
+          db.execSQL("ALTER TABLE `$table` ADD COLUMN `deleted_at` TEXT DEFAULT NULL")
+          db.execSQL("UPDATE `$table` SET `sync_version` = `updated_at` WHERE `sync_version` = ''")
+        }
+        db.execSQL("ALTER TABLE `profiles` ADD COLUMN `sync_version` TEXT NOT NULL DEFAULT ''")
+        db.execSQL("UPDATE `profiles` SET `sync_version` = `updated_at` WHERE `sync_version` = ''")
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_goals_account_id` ON `goals` (`account_id`)")
+      }
+    }
+
+  /** Stable operation ids let a cancelled worker retry a push without replaying it remotely. */
+  val MIGRATION_9_10 =
+    object : Migration(9, 10) {
+      override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE `outbox` ADD COLUMN `op_id` TEXT NOT NULL DEFAULT ''")
+        db.execSQL("UPDATE `outbox` SET `op_id` = 'legacy-' || `id` WHERE `op_id` = ''")
+        db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS `index_outbox_op_id` ON `outbox` (`op_id`)")
+      }
+    }
+
   val ALL: Array<Migration> =
-    arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8)
+    arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10)
 }

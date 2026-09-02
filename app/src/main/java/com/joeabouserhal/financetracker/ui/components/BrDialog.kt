@@ -1,11 +1,13 @@
 package com.joeabouserhal.financetracker.ui.components
 
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Column
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.unit.dp
 import com.joeabouserhal.financetracker.theme.LocalThemeSpec
 
 /** Brutalist-styled alert dialog wrapper (surface background, mono title). */
@@ -24,7 +26,7 @@ fun BrDialog(
   val spec = LocalThemeSpec.current
   AlertDialog(
     onDismissRequest = onDismiss,
-    modifier = modifier,
+    modifier = modifier.border(1.dp, spec.border),
     containerColor = spec.surface,
     titleContentColor = spec.ink,
     textContentColor = spec.ink,

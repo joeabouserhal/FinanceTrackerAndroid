@@ -38,6 +38,7 @@ fun BrChip(
   Row(
     modifier =
       modifier
+        .minimumInteractiveComponentSize()
         .background(face)
         .border(spec.borderWidth, if (selected) spec.accent else spec.border)
         .clickable(onClick = onClick)
@@ -61,7 +62,7 @@ fun BrChip(
       Text(
         text = "(${suffix.uppercase()})",
         style = MaterialTheme.typography.labelSmall,
-        color = spec.muted,
+        color = if (selected) content.copy(alpha = 0.72f) else spec.muted,
         modifier = Modifier.alignByBaseline(),
       )
     }

@@ -1,7 +1,6 @@
 package com.joeabouserhal.financetracker.ui.components
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -12,7 +11,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.joeabouserhal.financetracker.theme.LocalThemeSpec
 
-/** Big Archivo Black page title — intentionally borderless. */
+/** Compact editorial page heading. Hierarchy comes from type and whitespace. */
 @Composable
 fun ScreenHeader(
   title: String,
@@ -24,15 +23,19 @@ fun ScreenHeader(
     modifier
       .fillMaxWidth()
       .background(spec.background)
-      .padding(horizontal = 16.dp, vertical = 24.dp),
+      .padding(start = 20.dp, end = 20.dp, top = 22.dp, bottom = 14.dp),
   ) {
-    Text(title, style = MaterialTheme.typography.headlineLarge, color = spec.ink)
+    Text(
+      title.uppercase(),
+      style = MaterialTheme.typography.headlineLarge,
+      color = spec.ink,
+    )
     if (subtitle != null) {
       Text(
         subtitle,
-        style = MaterialTheme.typography.labelMedium,
+        style = MaterialTheme.typography.labelSmall,
         color = spec.muted,
-        modifier = Modifier.padding(top = 4.dp),
+        modifier = Modifier.padding(top = 5.dp),
       )
     }
   }

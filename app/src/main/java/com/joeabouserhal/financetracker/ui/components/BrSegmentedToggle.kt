@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -65,9 +66,10 @@ fun BrSegmentedToggle(
       Box(
         Modifier
           .weight(1f)
+          .defaultMinSize(minHeight = 48.dp)
           .background(bg)
           .selectable(selected = selected, role = Role.Tab, onClick = { onSelect(index) })
-          .padding(vertical = 14.dp),
+          .padding(horizontal = 8.dp, vertical = 12.dp),
         contentAlignment = Alignment.Center,
       ) {
         Text(

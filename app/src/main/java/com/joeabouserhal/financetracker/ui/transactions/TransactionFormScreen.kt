@@ -1,17 +1,22 @@
 package com.joeabouserhal.financetracker.ui.transactions
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.foundation.layout.navigationBarsPadding
@@ -31,6 +36,7 @@ import androidx.compose.material3.DatePicker
 import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberDatePickerState
@@ -44,14 +50,17 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.joeabouserhal.financetracker.R
 import com.joeabouserhal.financetracker.data.local.entities.TransactionEntity
 import com.joeabouserhal.financetracker.data.local.entities.TransactionType
 import com.joeabouserhal.financetracker.data.session.Session
@@ -246,27 +255,43 @@ fun TransactionFormScreen(
       .windowInsetsPadding(WindowInsets.systemBars.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal))
       .navigationBarsPadding(),
   ) {
-    // Fixed header + full-width type toggle
-    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    // Fixed editorial header + the existing type toggle.
+    Column(Modifier.padding(horizontal = 20.dp, vertical = 16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
       Row(
         Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically,
       ) {
-        Text(
-          if (transactionId == null) "ADD TRANSACTION" else "EDIT TRANSACTION",
-          style = MaterialTheme.typography.headlineMedium,
-          color = spec.ink,
-        )
-        Text(
-          "✕",
-          style = MaterialTheme.typography.headlineMedium,
-          color = spec.muted,
-          modifier = Modifier
-            .padding(horizontal = 8.dp, vertical = 4.dp)
-            .minimumInteractiveComponentSize()
+        Column(
+          modifier = Modifier.weight(1f),
+          verticalArrangement = Arrangement.spacedBy(3.dp),
+        ) {
+          Text(
+            if (transactionId == null) "NEW ENTRY" else "EDIT ENTRY",
+            style = MaterialTheme.typography.labelSmall,
+            color = spec.accent,
+          )
+          Text(
+            if (transactionId == null) "ADD TRANSACTION" else "EDIT TRANSACTION",
+            style = MaterialTheme.typography.headlineSmall,
+            color = spec.ink,
+          )
+        }
+        Box(
+          Modifier
+            .size(42.dp)
+            .background(spec.surface)
+            .border(1.dp, spec.border)
             .clickable(onClick = onBack),
-        )
+          contentAlignment = Alignment.Center,
+        ) {
+          Icon(
+            painter = painterResource(R.drawable.ic_close),
+            contentDescription = "Close",
+            tint = spec.muted,
+            modifier = Modifier.size(21.dp),
+          )
+        }
       }
 
       BrSegmentedToggle(
@@ -282,25 +307,25 @@ fun TransactionFormScreen(
     Column(
       Modifier
         .weight(1f)
-        .verticalScroll(rememberScrollState())
+        .verticalScroll(remember { ScrollState(0) })
         .padding(horizontal = 16.dp),
       verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-      BrTextField(
+      val selectedCurrency = currencies.firstOrNull { it.id == selectedCurrencyId }
+      AmountEditor(
         value = amountText,
         onValueChange = { amountText = it },
-        label = "AMOUNT",
-        modifier = Modifier.fillMaxWidth(),
-        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-        visualTransformation = remember { ThousandsSeparatorTransformation() },
-        suffix = {
-          currencies.firstOrNull { it.id == selectedCurrencyId }?.symbol?.let { symbol ->
-            Text(symbol, style = MaterialTheme.typography.bodyLarge, color = spec.muted)
-          }
-        },
+        currencyCode = selectedCurrency?.code ?: "—",
+        currencySymbol = selectedCurrency?.symbol ?: "",
+        type = type,
       )
 
-      BrTextField(value = title, onValueChange = { title = it }, label = "TITLE (OPTIONAL)", modifier = Modifier.fillMaxWidth())
+      BrTextField(
+        value = title,
+        onValueChange = { title = it },
+        label = "WHAT WAS IT FOR? (OPTIONAL)",
+        modifier = Modifier.fillMaxWidth(),
+      )
 
       SectionLabel("CURRENCY")
       Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -350,12 +375,21 @@ fun TransactionFormScreen(
         Modifier
           .fillMaxWidth()
           .background(spec.surface)
-          .padding(12.dp)
-          .clickable { showDatePicker = true },
+          .border(1.dp, spec.border.copy(alpha = 0.55f))
+          .clickable { showDatePicker = true }
+          .padding(horizontal = 14.dp, vertical = 13.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically,
       ) {
-        Text(date, style = MaterialTheme.typography.bodyLarge, color = spec.ink)
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+          Icon(
+            painter = painterResource(R.drawable.ic_calendar),
+            contentDescription = null,
+            tint = spec.accent,
+            modifier = Modifier.size(20.dp),
+          )
+          Text(date, style = MaterialTheme.typography.bodyLarge, color = spec.ink)
+        }
         Text("CHANGE", style = MaterialTheme.typography.labelSmall, color = spec.accent)
       }
 
@@ -364,22 +398,27 @@ fun TransactionFormScreen(
       error?.let {
         Text(it, style = MaterialTheme.typography.labelMedium, color = spec.expense)
       }
+
+      Spacer(Modifier.height(18.dp))
     }
 
-    // Pinned actions — the save button never scrolls out of view
-    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-      BrButton(text = if (transactionId == null) "ADD TRANSACTION" else "UPDATE", onClick = { save() }, modifier = Modifier.fillMaxWidth())
-      if (transactionId != null) {
-        Text(
-          "DELETE TRANSACTION",
-          style = MaterialTheme.typography.labelMedium,
-          color = spec.expense,
-          modifier = Modifier
-            .fillMaxWidth()
-            .clickable { showDeleteConfirm = true }
-            .padding(vertical = 8.dp),
-          textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-        )
+    // Pinned action dock — visually separate from the scrolling entry fields.
+    Column(Modifier.fillMaxWidth().background(spec.surface)) {
+      Box(Modifier.fillMaxWidth().height(1.dp).background(spec.border.copy(alpha = 0.55f)))
+      Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        BrButton(text = if (transactionId == null) "ADD TRANSACTION" else "UPDATE TRANSACTION", onClick = { save() }, modifier = Modifier.fillMaxWidth())
+        if (transactionId != null) {
+          Text(
+            "DELETE TRANSACTION",
+            style = MaterialTheme.typography.labelMedium,
+            color = spec.expense,
+            modifier = Modifier
+              .fillMaxWidth()
+              .clickable { showDeleteConfirm = true }
+              .padding(vertical = 8.dp),
+            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+          )
+        }
       }
     }
   }
@@ -508,6 +547,72 @@ fun TransactionFormScreen(
     ) {
       DatePicker(state = datePickerState)
     }
+  }
+}
+
+@Composable
+private fun AmountEditor(
+  value: String,
+  onValueChange: (String) -> Unit,
+  currencyCode: String,
+  currencySymbol: String,
+  type: TransactionType,
+) {
+  val spec = LocalThemeSpec.current
+  val typeColor = if (type == TransactionType.INCOME) spec.income else spec.expense
+  val typeLabel = if (type == TransactionType.INCOME) "MONEY IN" else "MONEY OUT"
+  val amountTransformation = remember { ThousandsSeparatorTransformation() }
+
+  Column(
+    Modifier
+      .fillMaxWidth()
+      .background(spec.surface)
+      .padding(horizontal = 16.dp, vertical = 14.dp),
+    verticalArrangement = Arrangement.spacedBy(12.dp),
+  ) {
+    Row(
+      Modifier.fillMaxWidth(),
+      horizontalArrangement = Arrangement.SpaceBetween,
+      verticalAlignment = Alignment.CenterVertically,
+    ) {
+      Text("AMOUNT", style = MaterialTheme.typography.labelSmall, color = spec.muted)
+      Text(
+        "$typeLabel  ·  $currencyCode",
+        style = MaterialTheme.typography.labelSmall,
+        color = typeColor,
+        modifier = Modifier.background(typeColor.copy(alpha = 0.10f)).padding(horizontal = 8.dp, vertical = 4.dp),
+      )
+    }
+
+    Row(verticalAlignment = Alignment.CenterVertically) {
+      if (currencySymbol.isNotBlank()) {
+        Text(
+          currencySymbol,
+          style = MaterialTheme.typography.titleLarge,
+          color = spec.muted,
+          modifier = Modifier.padding(end = 8.dp),
+        )
+      }
+      BasicTextField(
+        value = value,
+        onValueChange = onValueChange,
+        modifier = Modifier.weight(1f),
+        singleLine = true,
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+        visualTransformation = amountTransformation,
+        textStyle = MaterialTheme.typography.headlineLarge.copy(color = spec.ink),
+        cursorBrush = SolidColor(spec.accent),
+        decorationBox = { innerTextField ->
+          Box {
+            if (value.isBlank()) {
+              Text("0.00", style = MaterialTheme.typography.headlineLarge, color = spec.muted.copy(alpha = 0.42f))
+            }
+            innerTextField()
+          }
+        },
+      )
+    }
+    Box(Modifier.fillMaxWidth().height(2.dp).background(typeColor.copy(alpha = 0.72f)))
   }
 }
 

@@ -55,8 +55,13 @@ private class FakeSyncApi(
       }
     val id = stored.id()
     pushed += table to stored
-    server.getOrPut(table) { mutableListOf() }.removeAll { it.id() == id }
-    server.getValue(table).add(stored)
+    // Push-order tests intentionally use skeletal payloads. A real Supabase
+    // RPC rejects those instead of publishing malformed rows for a later pull.
+    val publishable = table != "transactions" || stored.containsKey("type")
+    if (publishable) {
+      server.getOrPut(table) { mutableListOf() }.removeAll { it.id() == id }
+      server.getValue(table).add(stored)
+    }
   }
 
   override suspend fun deleteById(table: String, keyColumn: String, id: String) {

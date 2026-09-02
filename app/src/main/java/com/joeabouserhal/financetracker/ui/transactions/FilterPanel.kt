@@ -112,7 +112,6 @@ fun FilterPanel(
   var showAccountModal by remember { mutableStateOf(false) }
   var accountSearch by remember { mutableStateOf("") }
 
-  val selectedCurrency = currencies.firstOrNull { it.id in filters.currencyIds }
   val visibleAccounts = accounts.filter { filters.currencyIds.isEmpty() || it.currencyId in filters.currencyIds }
   // Categories follow the effective TYPE (explicit hint on the Report page,
   // otherwise the panel's own TYPE chips).
@@ -146,18 +145,89 @@ fun FilterPanel(
       else -> "CUSTOM"
     }
 
-  Column(Modifier.fillMaxWidth()) {
+  val activeCount = TransactionFiltering.activeCount(filters)
+
+  Column(
+    Modifier
+      .fillMaxWidth()
+      .padding(horizontal = 16.dp, vertical = 8.dp)
+      .background(spec.surface),
+  ) {
     Column(
-      Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
-      verticalArrangement = Arrangement.spacedBy(10.dp),
+      Modifier.fillMaxWidth().padding(16.dp),
+      verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
-      // Currency: ALL by default; tapping a currency selects it, tapping it
-      // again returns to ALL.
+      Row(
+        Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+      ) {
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+          Text("REFINE RESULTS", style = MaterialTheme.typography.labelLarge, color = spec.ink)
+          Text(
+            if (activeCount == 0) "SHOWING DEFAULT VIEW" else "$activeCount FILTER${if (activeCount == 1) "" else "S"} ACTIVE",
+            style = MaterialTheme.typography.labelSmall,
+            color = if (activeCount == 0) spec.muted else spec.accent,
+          )
+        }
+        if (activeCount > 0 || filters.currencyIds.isNotEmpty()) {
+          Text(
+            "RESET",
+            style = MaterialTheme.typography.labelMedium,
+            color = spec.accent,
+            modifier =
+              Modifier
+                .clickable {
+                  onFiltersChange(
+                    filters.copy(
+                      type = TypeFilter.ALL,
+                      sort = SortOrder.NEWEST,
+                      dateFrom = null,
+                      dateTo = null,
+                      search = "",
+                      categoryIds = emptySet(),
+                      accountIds = emptySet(),
+                      currencyIds = emptySet(),
+                    ),
+                  )
+                }
+                .padding(horizontal = 4.dp, vertical = 8.dp),
+          )
+        }
+      }
+
+      Box(Modifier.fillMaxWidth().height(1.dp).background(spec.border.copy(alpha = 0.38f)))
+
+      // Type remains hidden on Report, where its spending/earning toggle is
+      // always visible above this drawer.
+      if (showTypeRow) {
+        ChipRow("TYPE") {
+          TypeFilter.entries.forEach { tf ->
+            BrChip(
+              tf.label,
+              selected = filters.type == tf,
+              onClick = {
+                val allowed =
+                  allCategories.filter { tf == TypeFilter.ALL || it.type.name == tf.name }.map { it.id }.toSet()
+                onFiltersChange(filters.copy(type = tf, categoryIds = filters.categoryIds.intersect(allowed)))
+              },
+            )
+          }
+        }
+      }
+
+      // Date presets keep the most common choices one tap away.
+      ChipRow("DATE", if (datePreset == "CUSTOM") "${filters.dateFrom} → ${filters.dateTo}" else null) {
+        BrChip("ALL", selected = datePreset == "ALL", onClick = { onFiltersChange(filters.copy(dateFrom = null, dateTo = null)) })
+        BrChip("TODAY", selected = datePreset == "TODAY", onClick = { onFiltersChange(filters.copy(dateFrom = todayIso, dateTo = todayIso)) })
+        BrChip("THIS MONTH", selected = datePreset == "THIS MONTH", onClick = { onFiltersChange(filters.copy(dateFrom = monthBounds.first, dateTo = monthBounds.second)) })
+        BrChip("CUSTOM", selected = datePreset == "CUSTOM", onClick = { showRangePicker = true })
+      }
+
+      // Currency is a single-select context; accounts are pruned whenever it changes.
       ChipRow("CURRENCY") {
         BrChip(
           "ALL",
           selected = filters.currencyIds.isEmpty(),
-          large = true,
           onClick = { onFiltersChange(filters.copy(currencyIds = emptySet())) },
         )
         currencies.forEach { c ->
@@ -165,7 +235,6 @@ fun FilterPanel(
           BrChip(
             c.code,
             selected = selected,
-            large = true,
             onClick = {
               val newIds = if (selected) emptySet() else setOf(c.id)
               val newVisible = accounts.filter { newIds.isEmpty() || it.currencyId in newIds }
@@ -179,99 +248,37 @@ fun FilterPanel(
           )
         }
       }
-      // Account: ALL shows every account of the selected currency, CUSTOM opens
-      // a search modal, then every account is shown in the slider. Same-named
-      // accounts get their currency code appended, e.g. "Cash (LBP)".
-      ChipRow("ACCOUNT · ${selectedCurrency?.code ?: "ALL"}") {
-        BrChip("ALL", selected = filters.accountIds.isEmpty(), large = true, onClick = { onFiltersChange(filters.copy(accountIds = emptySet())) })
-        BrChip("CUSTOM", selected = filters.accountIds.isNotEmpty(), large = true, onClick = { showAccountModal = true })
-        val duplicateNames = visibleAccounts.groupingBy { it.name }.eachCount().filterValues { it > 1 }.keys
-        if (visibleAccounts.isEmpty()) {
-          Text("No accounts for this currency", style = MaterialTheme.typography.labelSmall, color = spec.muted)
-        } else {
-          visibleAccounts.forEach { a ->
-            val suffix = if (a.name in duplicateNames) currencies.firstOrNull { it.id == a.currencyId }?.code else null
-            BrChip(
-              a.name,
-              suffix = suffix,
-              selected = a.id in filters.accountIds,
-              large = true,
-              onClick = { onFiltersChange(filters.copy(accountIds = toggle(filters.accountIds, a.id))) },
-            )
-          }
-        }
+
+      // Accounts and categories stay compact here; their searchable dialogs
+      // handle long lists and multi-selection without stretching the drawer.
+      val selectedAccountNames = visibleAccounts.filter { it.id in filters.accountIds }.map { it.name }
+      ChipRow("ACCOUNT", selectedAccountNames.takeIf { it.isNotEmpty() }?.joinToString(" · ")) {
+        BrChip("ALL", selected = filters.accountIds.isEmpty(), onClick = { onFiltersChange(filters.copy(accountIds = emptySet())) })
+        BrChip(
+          if (filters.accountIds.isEmpty()) "CHOOSE" else "CHOSEN ${filters.accountIds.size}",
+          selected = filters.accountIds.isNotEmpty(),
+          onClick = { showAccountModal = true },
+        )
       }
-      // Type
-      if (showTypeRow) {
-        ChipRow("TYPE") {
-          TypeFilter.entries.forEach { tf ->
-            BrChip(
-              tf.label,
-              selected = filters.type == tf,
-              onClick = {
-                // Prune category selections that belong to another type.
-                val allowed =
-                  allCategories.filter { tf == TypeFilter.ALL || it.type.name == tf.name }.map { it.id }.toSet()
-                onFiltersChange(filters.copy(type = tf, categoryIds = filters.categoryIds.intersect(allowed)))
-              },
-            )
-          }
-        }
+
+      val selectedCategoryNames = visibleCategories.filter { it.id in filters.categoryIds }.map { it.name }
+      ChipRow("CATEGORY", selectedCategoryNames.takeIf { it.isNotEmpty() }?.joinToString(" · ")) {
+        BrChip("ALL", selected = filters.categoryIds.isEmpty(), onClick = { onFiltersChange(filters.copy(categoryIds = emptySet())) })
+        BrChip(
+          if (filters.categoryIds.isEmpty()) "CHOOSE" else "CHOSEN ${filters.categoryIds.size}",
+          selected = filters.categoryIds.isNotEmpty(),
+          onClick = { showCategoryModal = true },
+        )
       }
-      // Sort
+
       ChipRow("SORT") {
         SortOrder.entries.forEach { so ->
           BrChip(so.label, selected = filters.sort == so, onClick = { onFiltersChange(filters.copy(sort = so)) })
         }
       }
-      // Date: presets + custom range picker
-      ChipRow("DATE") {
-        BrChip("ALL", selected = datePreset == "ALL", onClick = { onFiltersChange(filters.copy(dateFrom = null, dateTo = null)) })
-        BrChip("TODAY", selected = datePreset == "TODAY", onClick = { onFiltersChange(filters.copy(dateFrom = todayIso, dateTo = todayIso)) })
-        BrChip("THIS MONTH", selected = datePreset == "THIS MONTH", onClick = { onFiltersChange(filters.copy(dateFrom = monthBounds.first, dateTo = monthBounds.second)) })
-        BrChip("CUSTOM", selected = datePreset == "CUSTOM", onClick = { showRangePicker = true })
-      }
-      // Category: ALL clears, CUSTOM opens a searchable multi-select modal,
-      // then every category of the selected TYPE is shown in the slider.
-      ChipRow("CATEGORY") {
-        BrChip("ALL", selected = filters.categoryIds.isEmpty(), onClick = { onFiltersChange(filters.copy(categoryIds = emptySet())) })
-        BrChip("CUSTOM", selected = filters.categoryIds.isNotEmpty(), onClick = { showCategoryModal = true })
-        visibleCategories.forEach { c ->
-          BrChip(
-            c.name,
-            selected = c.id in filters.categoryIds,
-            colorDot = parseCategoryColor(c.color),
-            onClick = { onFiltersChange(filters.copy(categoryIds = toggle(filters.categoryIds, c.id))) },
-          )
-        }
-      }
-      if (TransactionFiltering.activeCount(filters) > 0) {
-        Text(
-          "CLEAR ALL FILTERS",
-          style = MaterialTheme.typography.labelSmall,
-          color = spec.accent,
-          modifier = Modifier
-            .clickable {
-              onFiltersChange(
-                filters.copy(
-                  type = TypeFilter.ALL,
-                  sort = SortOrder.NEWEST,
-                  dateFrom = null,
-                  dateTo = null,
-                  categoryIds = emptySet(),
-                  accountIds = emptySet(),
-                ),
-              )
-            }
-            .padding(vertical = 4.dp),
-        )
-      }
     }
-    // Flat expanded panel: no tint, just a full-width rule underneath with breathing room.
-    Spacer(Modifier.height(10.dp))
-    Box(Modifier.fillMaxWidth().height(1.dp).background(spec.border.copy(alpha = 0.45f)))
-    Spacer(Modifier.height(10.dp))
   }
+  Spacer(Modifier.height(8.dp))
 
   // Custom date RANGE picker.
   if (showRangePicker) {
@@ -387,10 +394,15 @@ fun FilterPanel(
 }
 
 @Composable
-private fun ChipRow(label: String, content: @Composable () -> Unit) {
+private fun ChipRow(label: String, detail: String? = null, content: @Composable () -> Unit) {
   val spec = LocalThemeSpec.current
   Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-    Text(label, style = MaterialTheme.typography.labelSmall, color = spec.muted)
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+      Text(label, style = MaterialTheme.typography.labelSmall, color = spec.muted)
+      if (detail != null) {
+        Text(detail, style = MaterialTheme.typography.labelSmall, color = spec.accent)
+      }
+    }
     Row(
       Modifier.horizontalScroll(rememberScrollState()),
       horizontalArrangement = Arrangement.spacedBy(6.dp),

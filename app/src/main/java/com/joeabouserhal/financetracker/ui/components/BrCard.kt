@@ -26,7 +26,7 @@ fun BrCard(
   content: @Composable BoxScope.() -> Unit,
 ) {
   val spec = LocalThemeSpec.current
-  Box(modifier) {
+  Box(modifier.padding(end = spec.shadowOffset, bottom = spec.shadowOffset)) {
     Box(
       Modifier
         .matchParentSize()

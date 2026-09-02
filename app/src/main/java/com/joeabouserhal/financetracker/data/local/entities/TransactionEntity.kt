@@ -70,4 +70,6 @@ data class TransactionEntity(
   @ColumnInfo(name = "goal_id") val goalId: String?,
   @ColumnInfo(name = "created_at") val createdAt: String,
   @ColumnInfo(name = "updated_at") val updatedAt: String,
+  @ColumnInfo(name = "sync_version", defaultValue = "''") val syncVersion: String = updatedAt,
+  @ColumnInfo(name = "deleted_at") val deletedAt: String? = null,
 )

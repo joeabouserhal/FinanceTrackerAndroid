@@ -40,8 +40,7 @@ data class TabItem(
 
 /**
  * Real bottom navbar: solid full-width surface anchored to the screen bottom,
- * one hairline top rule, icons + labels, animated tint for the active tab and
- * a small animated accent block under it. No floating card.
+ * a quiet top rule and an accent tick for the active destination.
  */
 @Composable
 fun BrutalistTabBar(
@@ -56,16 +55,15 @@ fun BrutalistTabBar(
       .fillMaxWidth()
       .background(spec.surface),
   ) {
-    // Hairline separation from content above.
-    Box(Modifier.fillMaxWidth().height(1.dp).background(spec.border.copy(alpha = 0.16f)))
+    Box(Modifier.fillMaxWidth().height(1.dp).background(spec.border.copy(alpha = 0.65f)))
 
     Row(
       modifier =
         Modifier
           .fillMaxWidth()
           .windowInsetsPadding(WindowInsets.navigationBars)
-          .height(68.dp)
-          .padding(horizontal = 6.dp),
+          .height(64.dp)
+          .padding(horizontal = 4.dp),
       verticalAlignment = Alignment.CenterVertically,
     ) {
       tabs.forEachIndexed { index, tab ->
@@ -76,7 +74,7 @@ fun BrutalistTabBar(
           label = "tabTint",
         )
         val indicatorWidth by animateDpAsState(
-          targetValue = if (selected) 22.dp else 0.dp,
+          targetValue = if (selected) 18.dp else 0.dp,
           animationSpec = tween(220),
           label = "tabIndicator",
         )
@@ -87,17 +85,17 @@ fun BrutalistTabBar(
               .selectable(selected = selected, role = Role.Tab, onClick = { onSelect(index) })
               .padding(horizontal = 2.dp, vertical = 4.dp),
           horizontalAlignment = Alignment.CenterHorizontally,
-          verticalArrangement = Arrangement.spacedBy(6.dp),
+          verticalArrangement = Arrangement.spacedBy(3.dp),
         ) {
           Icon(
             painter = painterResource(tab.iconRes),
-            contentDescription = null, // decorative: the label text below is announced
+            contentDescription = null,
             tint = tint,
-            modifier = Modifier.size(24.dp),
+            modifier = Modifier.size(22.dp),
           )
           Text(
             text = tab.label.uppercase(),
-            style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.5.sp, letterSpacing = 0.sp),
+            style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp, letterSpacing = 0.sp),
             color = tint,
             maxLines = 1,
             softWrap = false,
@@ -106,7 +104,7 @@ fun BrutalistTabBar(
           Box(
             Modifier
               .width(indicatorWidth)
-              .height(3.dp)
+              .height(2.dp)
               .background(if (selected) spec.accent else Color.Transparent),
           )
         }

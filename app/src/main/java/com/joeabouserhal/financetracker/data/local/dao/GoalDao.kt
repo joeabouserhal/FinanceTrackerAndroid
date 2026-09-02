@@ -4,15 +4,16 @@ import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import androidx.room.Update
 import com.joeabouserhal.financetracker.data.local.entities.GoalEntity
 import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface GoalDao {
-  @Query("SELECT * FROM goals WHERE owner_id = :ownerId ORDER BY name")
+  @Query("SELECT * FROM goals WHERE owner_id = :ownerId AND deleted_at IS NULL ORDER BY name")
   fun observeAll(ownerId: String): Flow<List<GoalEntity>>
 
-  @Query("SELECT * FROM goals WHERE owner_id = :ownerId")
+  @Query("SELECT * FROM goals WHERE owner_id = :ownerId AND deleted_at IS NULL")
   suspend fun getAll(ownerId: String): List<GoalEntity>
 
   @Query("SELECT * FROM goals WHERE owner_id = :ownerId AND id = :id")
@@ -24,6 +25,9 @@ interface GoalDao {
   /** Sync pull inserts: never replace (REPLACE cascades to child tables). */
   @Insert(onConflict = OnConflictStrategy.IGNORE)
   suspend fun insertAll(entities: List<GoalEntity>)
+
+  @Update
+  suspend fun replaceFromSync(entity: GoalEntity)
 
   @Query(
     """
@@ -63,6 +67,9 @@ interface GoalDao {
     completed: Boolean,
     updatedAt: String,
   )
+
+  @Query("UPDATE goals SET deleted_at = :deletedAt, updated_at = :deletedAt, sync_version = :syncVersion WHERE owner_id = :ownerId AND id = :id")
+  suspend fun delete(ownerId: String, id: String, deletedAt: String, syncVersion: String)
 
   @Query("DELETE FROM goals WHERE owner_id = :ownerId AND id = :id")
   suspend fun delete(ownerId: String, id: String)

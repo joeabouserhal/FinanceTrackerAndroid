@@ -1,5 +1,6 @@
 package com.joeabouserhal.financetracker.data.sync
 
+import com.joeabouserhal.financetracker.data.local.entities.OutboxAction
 import kotlinx.serialization.json.JsonObject
 
 /**
@@ -17,6 +18,29 @@ interface SyncApi {
 
   /** Idempotent push: delete the row with [id] (no-op when absent). */
   suspend fun deleteById(table: String, keyColumn: String, id: String)
+
+  /**
+   * Applies a durable outbox operation. Implementations that support the
+   * hardened server RPC override this; fakes and older installations retain
+   * the same idempotent PostgREST behavior during rollout.
+   */
+  suspend fun applyMutation(
+    table: String,
+    action: OutboxAction,
+    payload: JsonObject,
+    keyColumn: String,
+    conflictColumn: String,
+    operationId: String,
+  ) {
+    when (action) {
+      OutboxAction.INSERT, OutboxAction.UPDATE -> upsert(table, payload, conflictColumn)
+      OutboxAction.DELETE -> {
+        val id = payload[keyColumn]?.toString()?.trim('"')
+          ?: throw IllegalArgumentException("DELETE operation for $table has no $keyColumn")
+        deleteById(table, keyColumn, id)
+      }
+    }
+  }
 
   /**
    * Rows for [ownerId] strictly after the (updated_at, key) cursor, ascending.

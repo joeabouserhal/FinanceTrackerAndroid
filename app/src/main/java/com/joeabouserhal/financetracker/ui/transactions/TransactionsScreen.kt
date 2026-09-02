@@ -50,6 +50,7 @@ import androidx.compose.ui.unit.dp
 import kotlin.math.roundToInt
 import kotlinx.coroutines.launch
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.joeabouserhal.financetracker.R
 import com.joeabouserhal.financetracker.data.local.entities.TransactionType
 import com.joeabouserhal.financetracker.data.repositories.TransactionListItem
 import com.joeabouserhal.financetracker.data.repositories.enrichTransactions
@@ -132,31 +133,28 @@ fun TransactionsScreen(
     ) {
       Row(
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
       ) {
         BrTextField(
           value = filters.search,
           onValueChange = { filters = filters.copy(search = it) },
           label = "SEARCH",
           modifier = Modifier.weight(1f),
+          leadingIconRes = R.drawable.ic_search,
+          trailingIconRes = if (filters.search.isNotBlank()) R.drawable.ic_close else null,
+          trailingIconDescription = "Clear search",
+          onTrailingIconClick = if (filters.search.isNotBlank()) ({ filters = filters.copy(search = "") }) else null,
         )
-        if (filters.search.isNotBlank()) {
-          Text(
-            "✕",
-            style = MaterialTheme.typography.labelLarge,
-            color = spec.muted,
-            modifier = Modifier
-              .minimumInteractiveComponentSize()
-              .clickable { filters = filters.copy(search = "") },
-          )
-        }
+        BrButton(
+          text = if (activeCount > 0) "FILTER $activeCount" else "FILTER",
+          onClick = { filtersOpen = !filtersOpen },
+          style = if (filtersOpen || activeCount > 0) BrButtonStyle.SOLID else BrButtonStyle.OUTLINE,
+          compact = true,
+          fillWidth = false,
+          minHeight = 56.dp,
+          modifier = Modifier.offset(y = 4.dp),
+        )
       }
-      BrButton(
-        text = if (activeCount > 0) "FILTERS ($activeCount)" else "FILTERS",
-        onClick = { filtersOpen = !filtersOpen },
-        style = if (filtersOpen || activeCount > 0) BrButtonStyle.SOLID else BrButtonStyle.OUTLINE,
-        modifier = Modifier.fillMaxWidth(),
-      )
     }
 
     AnimatedVisibility(
@@ -335,8 +333,13 @@ private fun SwipeRevealRow(
 private fun DateHeader(date: String, groupItems: List<TransactionListItem>) {
   val spec = LocalThemeSpec.current
   val label = formatDateLabel(date)
-  Column(Modifier.fillMaxWidth().background(spec.background).padding(vertical = 8.dp)) {
-    Text(label, style = MaterialTheme.typography.labelMedium, color = spec.muted)
+  Row(
+    Modifier.fillMaxWidth().background(spec.background).padding(top = 14.dp, bottom = 7.dp),
+    horizontalArrangement = Arrangement.SpaceBetween,
+    verticalAlignment = Alignment.CenterVertically,
+  ) {
+    Text(label, style = MaterialTheme.typography.labelMedium, color = spec.ink)
+    Text("${groupItems.size} ITEM${if (groupItems.size == 1) "" else "S"}", style = MaterialTheme.typography.labelSmall, color = spec.muted)
   }
 }
 
@@ -346,4 +349,3 @@ private fun formatDateLabel(iso: String): String =
   } catch (_: Exception) {
     iso.uppercase()
   }
-

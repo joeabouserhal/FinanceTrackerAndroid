@@ -169,7 +169,9 @@ class GoalRepository(
       // Remove every withdrawal this goal produced (multi-account goals
       // create several), then un-complete.
       db.transactionDao().getByGoal(ownerId, id).forEach { tx ->
-        db.transactionDao().delete(ownerId, tx.id)
+        val deletedAt = java.time.Instant.now().toString()
+        if (ownerId == com.joeabouserhal.financetracker.data.local.GUEST_OWNER_ID) db.transactionDao().delete(ownerId, tx.id)
+        else db.transactionDao().delete(ownerId, tx.id, deletedAt, com.joeabouserhal.financetracker.data.sync.SyncVersion.next())
         OutboxWriter.enqueue(db, ownerId, "transactions", OutboxAction.DELETE, OutboxWriter.deletePayload(tx.id))
       }
       dao.update(
@@ -190,7 +192,9 @@ class GoalRepository(
 
   suspend fun delete(ownerId: String, id: String) {
     db.withTransaction {
-      dao.delete(ownerId, id)
+      val deletedAt = java.time.Instant.now().toString()
+      if (ownerId == com.joeabouserhal.financetracker.data.local.GUEST_OWNER_ID) dao.delete(ownerId, id)
+      else dao.delete(ownerId, id, deletedAt, com.joeabouserhal.financetracker.data.sync.SyncVersion.next())
       OutboxWriter.enqueue(db, ownerId, "goals", OutboxAction.DELETE, OutboxWriter.deletePayload(id))
     }
   }

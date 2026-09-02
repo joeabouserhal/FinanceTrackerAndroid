@@ -18,4 +18,6 @@ data class CategoryEntity(
   @ColumnInfo(name = "is_default") val isDefault: Boolean = false,
   @ColumnInfo(name = "created_at") val createdAt: String,
   @ColumnInfo(name = "updated_at", defaultValue = "''") val updatedAt: String,
+  @ColumnInfo(name = "sync_version", defaultValue = "''") val syncVersion: String = updatedAt,
+  @ColumnInfo(name = "deleted_at") val deletedAt: String? = null,
 )

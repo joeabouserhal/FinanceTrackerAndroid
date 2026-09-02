@@ -71,10 +71,10 @@ class SyncScheduler(private val context: Context) {
         .setConstraints(networkConstraint)
         .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 30, TimeUnit.SECONDS)
         .build()
-    // REPLACE: a manual/automatic "sync now" must run immediately — cancel any
-    // backed-off/pending retry and start a fresh attempt instead of queuing
-    // behind a delayed job (which made the button look dead).
-    workManager.enqueueUniqueWork(SyncWorker.NOW_WORK, ExistingWorkPolicy.REPLACE, request)
+    // Never cancel an in-flight push: each request is idempotent, but keeping
+    // the active worker avoids unnecessary duplicate network work and keeps a
+    // multi-row local transaction from being observed half-synced remotely.
+    workManager.enqueueUniqueWork(SyncWorker.NOW_WORK, ExistingWorkPolicy.KEEP, request)
   }
 
   /** Sign-out: stop both periodic and pending on-demand syncs. */

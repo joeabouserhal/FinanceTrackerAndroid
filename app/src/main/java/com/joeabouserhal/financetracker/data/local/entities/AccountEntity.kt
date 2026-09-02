@@ -32,4 +32,6 @@ data class AccountEntity(
   @ColumnInfo(name = "is_default", defaultValue = "0") val isDefault: Boolean = false,
   @ColumnInfo(name = "created_at") val createdAt: String,
   @ColumnInfo(name = "updated_at", defaultValue = "''") val updatedAt: String,
+  @ColumnInfo(name = "sync_version", defaultValue = "''") val syncVersion: String = updatedAt,
+  @ColumnInfo(name = "deleted_at") val deletedAt: String? = null,
 )

@@ -9,6 +9,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -21,6 +22,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -38,7 +40,6 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -133,23 +134,20 @@ fun DashboardScreen(
 private fun SectionLabel(text: String) {
   val spec = LocalThemeSpec.current
   Text(
-    text,
+    text = text,
     style = MaterialTheme.typography.labelMedium,
-    color = spec.accent,
+    color = spec.ink.copy(alpha = 0.88f),
     modifier =
       Modifier
         .drawBehind {
-          // Dotted underline: only under the text, faint accent dots so the
-          // label keeps its hierarchy without drawing the eye. The bottom
-          // padding below gives the dots a small gap from the glyphs.
-          val y = size.height - 2.dp.toPx()
+          val y = size.height - 1.dp.toPx()
           drawLine(
-            color = spec.accent.copy(alpha = 0.5f),
+            color = spec.accent.copy(alpha = 0.48f),
             start = Offset(0f, y),
             end = Offset(size.width, y),
-            strokeWidth = 2.dp.toPx(),
+            strokeWidth = 1.25.dp.toPx(),
             cap = StrokeCap.Round,
-            pathEffect = PathEffect.dashPathEffect(floatArrayOf(0f, 5.5.dp.toPx()), 0f),
+            pathEffect = PathEffect.dashPathEffect(floatArrayOf(0f, 4.dp.toPx())),
           )
         }
         .padding(bottom = 5.dp),
@@ -159,20 +157,14 @@ private fun SectionLabel(text: String) {
 @Composable
 private fun SectionDivider() {
   val spec = LocalThemeSpec.current
-  Box(Modifier.fillMaxWidth().height(1.dp).background(spec.border.copy(alpha = 0.45f)))
-}
-
-@Composable
-private fun ThinDivider() {
-  val spec = LocalThemeSpec.current
-  Box(Modifier.fillMaxWidth().height(1.dp).background(spec.border.copy(alpha = 0.25f)))
+  Box(Modifier.fillMaxWidth().height(1.dp).background(spec.border.copy(alpha = 0.28f)))
 }
 
 /** Receipt-style hairline: a thin dashed rule in the border color. */
 @Composable
 private fun DashedDivider() {
   val spec = LocalThemeSpec.current
-  val color = spec.border.copy(alpha = 0.4f)
+  val color = spec.border.copy(alpha = 0.32f)
   Canvas(Modifier.fillMaxWidth().height(1.dp)) {
     drawLine(
       color = color,
@@ -313,8 +305,9 @@ private fun ActivitySection(
       Box(
         Modifier
           .weight(1f)
-          .height(56.dp)
+          .height(48.dp)
           .background(spec.surface)
+          .border(1.dp, spec.border.copy(alpha = 0.6f))
           .clickable { showMonthPicker = true },
         contentAlignment = Alignment.Center,
       ) {
@@ -359,8 +352,9 @@ private fun MonthArrow(label: String, onClick: () -> Unit, enabled: Boolean = tr
   Box(
     Modifier
       .minimumInteractiveComponentSize()
-      .height(56.dp)
+      .height(48.dp)
       .background(spec.surface)
+      .border(1.dp, spec.border.copy(alpha = 0.6f))
       .clickable(enabled = enabled, onClick = onClick),
     contentAlignment = Alignment.Center,
   ) {
@@ -405,7 +399,7 @@ private fun ActivityBlock(activity: MonthlyActivity) {
 
     Row(verticalAlignment = Alignment.CenterVertically) {
       Column(Modifier.weight(1f)) {
-        Row(Modifier.fillMaxWidth().height(20.dp)) {
+        Row(Modifier.fillMaxWidth().height(10.dp)) {
           if (hasExpense) {
             val expenseFraction = if (hasIncome) 1f - incomeFraction else 1f
             Box(
@@ -414,12 +408,7 @@ private fun ActivityBlock(activity: MonthlyActivity) {
                 .weight(expenseFraction)
                 .background(spec.expense)
                 .padding(horizontal = 4.dp),
-              contentAlignment = Alignment.CenterStart,
-            ) {
-              if (expenseFraction > 0.12f) {
-                Text("$expensePct%", style = MaterialTheme.typography.labelMedium, color = darkerForBar(spec.expense))
-              }
-            }
+            )
           }
           if (hasIncome) {
             val incomeShare = if (hasExpense) incomeFraction else 1f
@@ -429,23 +418,18 @@ private fun ActivityBlock(activity: MonthlyActivity) {
                 .weight(incomeShare)
                 .background(spec.income)
                 .padding(horizontal = 4.dp),
-              contentAlignment = Alignment.CenterEnd,
-            ) {
-              if (incomeShare > 0.12f) {
-                Text("$incomePct%", style = MaterialTheme.typography.labelMedium, color = darkerForBar(spec.income))
-              }
-            }
+            )
           }
         }
         Spacer(Modifier.height(4.dp))
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
           Text(
-            "- ${Money.format(activity.expenseMinor, activity.currency.symbol)}",
+            "- ${Money.format(activity.expenseMinor, activity.currency.symbol)} · $expensePct%",
             style = MaterialTheme.typography.labelMedium,
             color = spec.expense,
           )
           Text(
-            "+ ${Money.format(activity.incomeMinor, activity.currency.symbol)}",
+            "+ ${Money.format(activity.incomeMinor, activity.currency.symbol)} · $incomePct%",
             style = MaterialTheme.typography.labelMedium,
             color = spec.income,
           )
@@ -461,10 +445,10 @@ private fun RecentSection(
   onEdit: (String) -> Unit,
   onSeeAll: () -> Unit,
 ) {
-  Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-    recent.forEachIndexed { index, item ->
+  Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    SectionLabel("RECENT")
+    recent.forEach { item ->
       TransactionRow(item = item, onPress = { onEdit(item.transaction.id) })
-      if (index < recent.lastIndex) DashedDivider()
     }
     BrButton(
       text = "VIEW MORE",
@@ -474,11 +458,3 @@ private fun RecentSection(
     )
   }
 }
-
-/** Darker variant of a bar color, for the percentage text drawn inside it. */
-private fun darkerForBar(color: androidx.compose.ui.graphics.Color): androidx.compose.ui.graphics.Color {
-  val hsv = FloatArray(3)
-  android.graphics.Color.colorToHSV(color.toArgb(), hsv)
-  return androidx.compose.ui.graphics.Color.hsv(hsv[0], hsv[1], hsv[2] * 0.5f)
-}
-

@@ -112,7 +112,7 @@ fun GoalsScreen(
   val completedGoals = progress.filter { it.goal.completed }
 
   Column(modifier.fillMaxSize().background(spec.background)) {
-    ScreenHeader(title = "Goals", subtitle = "SAVE TOWARD A TARGET — WE TRACK THE PERCENTAGE")
+    ScreenHeader(title = "Goals", subtitle = "TARGETS / PROGRESS")
 
     Column(
       Modifier
@@ -123,15 +123,23 @@ fun GoalsScreen(
     ) {
       error?.let { Text(it, style = MaterialTheme.typography.labelMedium, color = spec.expense) }
 
-      BrButton(text = "+ Add goal", onClick = { adding = true })
-
-      if (completedGoals.isNotEmpty()) {
+      Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         BrButton(
-          text = "VIEW COMPLETED GOALS (${completedGoals.size})",
-          onClick = onOpenCompletedGoals,
-          style = BrButtonStyle.OUTLINE,
-          modifier = Modifier.fillMaxWidth(),
+          text = "NEW GOAL",
+          onClick = { adding = true },
+          iconRes = R.drawable.ic_add,
+          compact = true,
+          modifier = Modifier.weight(1f),
         )
+        if (completedGoals.isNotEmpty()) {
+          BrButton(
+            text = "DONE ${completedGoals.size}",
+            onClick = onOpenCompletedGoals,
+            style = BrButtonStyle.OUTLINE,
+            compact = true,
+            modifier = Modifier.weight(1f),
+          )
+        }
       }
 
       if (progress.isEmpty()) {
@@ -452,7 +460,7 @@ internal fun GoalCard(
       .fillMaxWidth()
       .background(spec.surface)
       .then(if (onTap != null) Modifier.clickable(onClick = onTap) else Modifier)
-      .padding(14.dp),
+      .padding(horizontal = 16.dp, vertical = 14.dp),
     verticalArrangement = Arrangement.spacedBy(8.dp),
   ) {
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
@@ -469,7 +477,7 @@ internal fun GoalCard(
       }
     }
     Text(scopeLabel, style = MaterialTheme.typography.labelMedium, color = spec.muted)
-    Box(Modifier.fillMaxWidth().height(12.dp).background(spec.surfaceAlt)) {
+    Box(Modifier.fillMaxWidth().height(6.dp).background(spec.surfaceAlt)) {
       Box(
         Modifier
           .fillMaxHeight()

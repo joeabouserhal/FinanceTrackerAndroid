@@ -4,19 +4,20 @@ import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import androidx.room.Update
 import com.joeabouserhal.financetracker.data.local.entities.PresetEntity
 import com.joeabouserhal.financetracker.data.local.entities.TransactionType
 import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface PresetDao {
-  @Query("SELECT * FROM presets WHERE owner_id = :ownerId AND archived = 0 AND type = :type ORDER BY name")
+  @Query("SELECT * FROM presets WHERE owner_id = :ownerId AND deleted_at IS NULL AND archived = 0 AND type = :type ORDER BY name")
   fun observeByType(ownerId: String, type: TransactionType): Flow<List<PresetEntity>>
 
-  @Query("SELECT * FROM presets WHERE owner_id = :ownerId AND archived = 0 ORDER BY type, name")
+  @Query("SELECT * FROM presets WHERE owner_id = :ownerId AND deleted_at IS NULL AND archived = 0 ORDER BY type, name")
   fun observeAll(ownerId: String): Flow<List<PresetEntity>>
 
-  @Query("SELECT * FROM presets WHERE owner_id = :ownerId")
+  @Query("SELECT * FROM presets WHERE owner_id = :ownerId AND deleted_at IS NULL")
   suspend fun getAll(ownerId: String): List<PresetEntity>
 
   @Query("SELECT * FROM presets WHERE owner_id = :ownerId AND id = :id")
@@ -31,6 +32,9 @@ interface PresetDao {
   /** Sync pull inserts: never replace (REPLACE cascades to child tables). */
   @Insert(onConflict = OnConflictStrategy.IGNORE)
   suspend fun insertAll(entities: List<PresetEntity>)
+
+  @Update
+  suspend fun replaceFromSync(entity: PresetEntity)
 
   @Query(
     """
@@ -76,6 +80,9 @@ interface PresetDao {
     archived: Boolean,
     updatedAt: String,
   )
+
+  @Query("UPDATE presets SET deleted_at = :deletedAt, updated_at = :deletedAt, sync_version = :syncVersion WHERE owner_id = :ownerId AND id = :id")
+  suspend fun delete(ownerId: String, id: String, deletedAt: String, syncVersion: String)
 
   @Query("DELETE FROM presets WHERE owner_id = :ownerId AND id = :id")
   suspend fun delete(ownerId: String, id: String)

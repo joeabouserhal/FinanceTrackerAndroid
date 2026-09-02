@@ -25,8 +25,7 @@ import com.joeabouserhal.financetracker.R
 import com.joeabouserhal.financetracker.theme.LocalThemeSpec
 
 /**
- * Circular floating action button: accent face, offset hard shadow, thin
- * border, press-down scale spring.
+ * Compact square action: accent face, restrained hard shadow, press spring.
  */
 @Composable
 fun BrFab(
@@ -44,19 +43,19 @@ fun BrFab(
     label = "fabScale",
   )
 
-  Box(modifier.size(64.dp)) {
+  Box(modifier.size(58.dp)) {
     Box(
       Modifier
-        .matchParentSize()
+        .size(54.dp)
         .offset(spec.shadowOffset, spec.shadowOffset)
-        .background(spec.border),
+        .background(spec.muted),
     )
     Box(
       Modifier
-        .matchParentSize()
+        .size(54.dp)
         .scale(scale)
         .background(spec.accent)
-        .border(spec.borderWidth, spec.border)
+        .border(spec.borderWidth, spec.onAccent)
         .clickable(
           interactionSource = interactionSource,
           indication = null,
@@ -65,13 +64,13 @@ fun BrFab(
       contentAlignment = Alignment.Center,
     ) {
       if (showCloseIcon) {
-        Text("✕", color = spec.onAccent, fontSize = 26.sp)
+        Text("×", color = spec.onAccent, fontSize = 24.sp)
       } else {
         Icon(
           painter = painterResource(R.drawable.ic_add),
           contentDescription = contentDescription,
           tint = spec.onAccent,
-          modifier = Modifier.size(32.dp),
+          modifier = Modifier.size(28.dp),
         )
       }
     }

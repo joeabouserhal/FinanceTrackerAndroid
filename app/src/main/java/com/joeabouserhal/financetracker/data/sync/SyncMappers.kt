@@ -32,6 +32,8 @@ object SyncMappers {
       isDefault = row.optBool("is_default"),
       createdAt = row.createdAt(),
       updatedAt = row.reqString("updated_at"),
+      syncVersion = row.optString("sync_version") ?: row.reqString("updated_at"),
+      deletedAt = row.optString("deleted_at"),
     )
 
   fun category(row: JsonObject): CategoryEntity =
@@ -44,6 +46,8 @@ object SyncMappers {
       isDefault = row.optBool("is_default"),
       createdAt = row.createdAt(),
       updatedAt = row.reqString("updated_at"),
+      syncVersion = row.optString("sync_version") ?: row.reqString("updated_at"),
+      deletedAt = row.optString("deleted_at"),
     )
 
   fun account(row: JsonObject): AccountEntity =
@@ -56,6 +60,8 @@ object SyncMappers {
       isDefault = row.optBool("is_default"),
       createdAt = row.createdAt(),
       updatedAt = row.reqString("updated_at"),
+      syncVersion = row.optString("sync_version") ?: row.reqString("updated_at"),
+      deletedAt = row.optString("deleted_at"),
     )
 
   fun preset(row: JsonObject): PresetEntity =
@@ -71,6 +77,8 @@ object SyncMappers {
       archived = row.optBool("archived"),
       createdAt = row.createdAt(),
       updatedAt = row.reqString("updated_at"),
+      syncVersion = row.optString("sync_version") ?: row.reqString("updated_at"),
+      deletedAt = row.optString("deleted_at"),
     )
 
   fun goal(row: JsonObject): GoalEntity =
@@ -84,6 +92,8 @@ object SyncMappers {
       completed = row.optBool("completed"),
       createdAt = row.createdAt(),
       updatedAt = row.reqString("updated_at"),
+      syncVersion = row.optString("sync_version") ?: row.reqString("updated_at"),
+      deletedAt = row.optString("deleted_at"),
     )
 
   fun transaction(row: JsonObject): TransactionEntity =
@@ -102,6 +112,8 @@ object SyncMappers {
       goalId = row.optString("goal_id"),
       createdAt = row.createdAt(),
       updatedAt = row.reqString("updated_at"),
+      syncVersion = row.optString("sync_version") ?: row.reqString("updated_at"),
+      deletedAt = row.optString("deleted_at"),
     )
 
   fun profile(row: JsonObject): ProfileEntity =
@@ -110,20 +122,21 @@ object SyncMappers {
       name = row.reqString("name"),
       updatedAt = row.reqString("updated_at"),
       createdAt = row.optString("created_at")?.takeIf { it.isNotBlank() } ?: row.reqString("updated_at"),
+      syncVersion = row.optString("sync_version") ?: row.reqString("updated_at"),
     )
 
-  /**
-   * LWW: the remote row wins when its server-authoritative updated_at is at
-   * least as new as the local one. ISO instants are parsed because raw string
-   * comparison is wrong across precision/offset variants.
-   */
+  /** Remote wins on the hybrid logical clock; legacy ISO values remain comparable during rollout. */
   fun remoteAtLeastAsNew(localUpdatedAt: String, remoteUpdatedAt: String): Boolean =
-    try {
-      Instant.parse(localUpdatedAt) <= Instant.parse(remoteUpdatedAt)
-    } catch (_: Exception) {
-      // Fall back to string comparison for non-ISO values; ties favor remote.
-      localUpdatedAt <= remoteUpdatedAt
+    when {
+      localUpdatedAt.isHlc() && remoteUpdatedAt.isHlc() -> localUpdatedAt <= remoteUpdatedAt
+      else -> localUpdatedAt.toEpochMillis() <= remoteUpdatedAt.toEpochMillis()
     }
+
+  private fun String.isHlc(): Boolean = length > 20 && this[19] == '-'
+
+  private fun String.toEpochMillis(): Long =
+    if (isHlc()) substring(0, 19).toLongOrNull() ?: Long.MIN_VALUE
+    else try { Instant.parse(this).toEpochMilli() } catch (_: Exception) { Long.MIN_VALUE }
 
   private fun JsonObject.type(): TransactionType =
     TransactionType.valueOf(reqString("type").uppercase())

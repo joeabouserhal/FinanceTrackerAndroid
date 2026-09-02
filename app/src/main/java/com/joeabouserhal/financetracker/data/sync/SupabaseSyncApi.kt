@@ -4,8 +4,10 @@ import io.github.jan.supabase.SupabaseClient
 import io.github.jan.supabase.auth.auth
 import io.github.jan.supabase.postgrest.postgrest
 import io.github.jan.supabase.postgrest.query.Order
+import com.joeabouserhal.financetracker.data.local.entities.OutboxAction
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 
 /**
  * PostgREST-backed [SyncApi]. Every request is scoped by RLS (auth.uid() =
@@ -39,6 +41,28 @@ class SupabaseSyncApi(private val client: SupabaseClient?) : SyncApi {
     requireClient().postgrest.from(table).delete {
       filter { eq(keyColumn, id) }
     }
+  }
+
+  /** Server-side ownership checks, version comparison, and operation-id dedupe. */
+  override suspend fun applyMutation(
+    table: String,
+    action: OutboxAction,
+    payload: JsonObject,
+    keyColumn: String,
+    conflictColumn: String,
+    operationId: String,
+  ) {
+    val params =
+      JsonObject(
+        mapOf(
+          "p_table" to JsonPrimitive(table),
+          "p_action" to JsonPrimitive(action.name.lowercase()),
+          "p_payload" to payload,
+          "p_version" to (payload["sync_version"] ?: JsonPrimitive("")),
+          "p_operation_id" to JsonPrimitive(operationId),
+        ),
+      )
+    requireClient().postgrest.rpc("apply_sync_mutation", params)
   }
 
   override suspend fun pullRows(

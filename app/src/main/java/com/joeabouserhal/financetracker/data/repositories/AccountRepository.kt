@@ -119,7 +119,9 @@ class AccountRepository(
       "Each currency needs at least one account — add another account before deleting this one"
     }
     db.withTransaction {
-      dao.delete(ownerId, id)
+      val deletedAt = java.time.Instant.now().toString()
+      if (ownerId == com.joeabouserhal.financetracker.data.local.GUEST_OWNER_ID) dao.delete(ownerId, id)
+      else dao.delete(ownerId, id, deletedAt, com.joeabouserhal.financetracker.data.sync.SyncVersion.next())
       if (target.isDefault) promoteFirstActive(ownerId, target.currencyId, exceptId = target.id)
       OutboxWriter.enqueue(db, ownerId, "accounts", OutboxAction.DELETE, OutboxWriter.deletePayload(id))
     }

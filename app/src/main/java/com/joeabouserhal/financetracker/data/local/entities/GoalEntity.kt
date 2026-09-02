@@ -27,7 +27,7 @@ import androidx.room.PrimaryKey
         onDelete = ForeignKey.CASCADE,
       ),
     ],
-  indices = [Index("owner_id"), Index("currency_id")],
+  indices = [Index("owner_id"), Index("currency_id"), Index("account_id")],
 )
 data class GoalEntity(
   @PrimaryKey val id: String,
@@ -39,4 +39,6 @@ data class GoalEntity(
   @ColumnInfo(name = "completed", defaultValue = "0") val completed: Boolean = false,
   @ColumnInfo(name = "created_at") val createdAt: String,
   @ColumnInfo(name = "updated_at", defaultValue = "''") val updatedAt: String,
+  @ColumnInfo(name = "sync_version", defaultValue = "''") val syncVersion: String = updatedAt,
+  @ColumnInfo(name = "deleted_at") val deletedAt: String? = null,
 )

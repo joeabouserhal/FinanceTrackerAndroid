@@ -1,7 +1,6 @@
 package com.joeabouserhal.financetracker.ui.components
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.padding
@@ -21,8 +20,8 @@ fun EmptyState(
   val spec = LocalThemeSpec.current
   Column(
     modifier
-      .background(spec.surfaceAlt)
-      .padding(16.dp),
+      .background(spec.surface)
+      .padding(horizontal = 18.dp, vertical = 22.dp),
     verticalArrangement = Arrangement.Center,
     horizontalAlignment = Alignment.CenterHorizontally,
   ) {

@@ -98,7 +98,9 @@ class CurrencyRepository(
     var promotedCode: String? = null
     try {
       db.withTransaction {
-        dao.delete(ownerId, id)
+        val deletedAt = java.time.Instant.now().toString()
+        if (ownerId == com.joeabouserhal.financetracker.data.local.GUEST_OWNER_ID) dao.delete(ownerId, id)
+        else dao.delete(ownerId, id, deletedAt, com.joeabouserhal.financetracker.data.sync.SyncVersion.next())
         OutboxWriter.enqueue(db, ownerId, "currencies", OutboxAction.DELETE, OutboxWriter.deletePayload(id))
         if (target.isDefault) {
           dao.getAll(ownerId).firstOrNull()?.let { next ->
