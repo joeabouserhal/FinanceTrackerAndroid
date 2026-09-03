@@ -8,7 +8,7 @@
          hands off to the regular app theme once the first frame is ready. -->
     <style name="Theme.FinanceTracker.Starting" parent="Theme.SplashScreen">
         <item name="windowSplashScreenBackground">@color/splash_background</item>
-        <item name="windowSplashScreenAnimatedIcon">@drawable/ic_splash_logo</item>
+        <item name="windowSplashScreenAnimatedIcon">@drawable/ic_splash_logo_vector</item>
         <item name="postSplashScreenTheme">@style/Theme.FinanceTracker</item>
     </style>
 </resources>

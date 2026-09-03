@@ -90,7 +90,7 @@ class AppContainer(context: Context) {
     SyncStatusRepository(
       sessionManager = sessionManager,
       outboxDao = appDatabase.outboxDao(),
-      syncMetaDao = appDatabase.syncMetaDao(),
+      syncHealthDao = appDatabase.syncHealthDao(),
       connectivityMonitor = connectivityMonitor,
       workInfos = syncScheduler.workInfos,
     )

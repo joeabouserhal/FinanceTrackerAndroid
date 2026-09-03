@@ -16,6 +16,7 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -303,27 +304,137 @@ class SyncEngineTest {
   }
 
   @Test
-  fun `permanently failing op is given up after the attempt cap and no longer blocks retries`() = runTest {
+  fun `previously exhausted op keeps retrying and recovers after server fix`() = runTest {
     val api = FakeSyncApi().apply { failUpsertFor = "transactions" }
     val opId =
       db.outboxDao().insert(OutboxWriter.newOp(USER_ID, "transactions", OutboxAction.INSERT, buildJsonObject { put("id", "tx-1"); put("user_id", USER_ID) }))
-    db.outboxDao().updateAttempts(opId, SyncEngine.MAX_PUSH_ATTEMPTS)
+    db.outboxDao().updateAttempts(opId, 10)
 
     val outcome = engine(api).sync() as SyncOutcome.Completed
 
-    // Dead op: counted, kept locally, but the run is clean (worker won't retry).
-    assertEquals(1, outcome.deadOps)
-    assertEquals(0, outcome.failedOps)
-    assertTrue(outcome.isClean)
+    assertEquals(0, outcome.deadOps)
+    assertEquals(1, outcome.failedOps)
+    assertTrue(!outcome.isClean)
     assertEquals(1, db.outboxDao().getAllForOwner(USER_ID).size)
+    assertEquals(11, db.outboxDao().getAllForOwner(USER_ID).single().attempts)
+    assertEquals("RETRYING", db.outboxDao().getAllForOwner(USER_ID).single().errorKind)
+    assertTrue(db.syncHealthDao().get(USER_ID)?.lastError != null)
 
     // A later successful op still flows through.
     api.failUpsertFor = null
     db.outboxDao().insert(OutboxWriter.newOp(USER_ID, "currencies", OutboxAction.INSERT, currencyPayload("cur-9", "USD")))
     val second = engine(api).sync() as SyncOutcome.Completed
     assertEquals(0, second.failedOps)
-    assertEquals(1, second.pushed)
-    assertEquals("cur-9", (api.pushed.last().second["id"] as JsonPrimitive).contentOrNull)
-    assertEquals(1, db.outboxDao().getAllForOwner(USER_ID).size) // only the dead op remains
+    assertEquals(2, second.pushed)
+    assertEquals(0, db.outboxDao().getAllForOwner(USER_ID).size)
+    assertEquals(null, db.syncHealthDao().get(USER_ID)?.lastError)
+    assertTrue(db.syncHealthDao().get(USER_ID)?.lastSuccessAt != null)
+  }
+
+  @Test
+  fun `cancelled push retains original operation without counting failure`() = runTest {
+    val fake = FakeSyncApi()
+    val api = object : SyncApi by fake {
+      override suspend fun upsert(table: String, payload: JsonObject, onConflict: String) {
+        throw kotlinx.coroutines.CancellationException("worker stopped")
+      }
+      override suspend fun applyMutation(table: String, action: OutboxAction, payload: JsonObject, keyColumn: String, conflictColumn: String, operationId: String): MutationResult? {
+        throw kotlinx.coroutines.CancellationException("worker stopped")
+      }
+    }
+    val op = OutboxWriter.newOp(USER_ID, "currencies", OutboxAction.INSERT, currencyPayload("cur-1", "USD"))
+    db.outboxDao().insert(op)
+    var cancelled = false
+    try { engine(api).sync() } catch (_: kotlinx.coroutines.CancellationException) { cancelled = true }
+    assertTrue(cancelled)
+    val remaining = db.outboxDao().getAllForOwner(USER_ID).single()
+    assertEquals(op.opId, remaining.opId)
+    assertEquals(0, remaining.attempts)
+    assertEquals(null, remaining.lastError)
+  }
+
+  @Test
+  fun `malformed pull page rolls back valid rows and retains cursor`() = runTest {
+    val api = FakeSyncApi()
+    api.seedCurrency("cur-1", "USD", "2026-08-23T10:00:00Z")
+    api.server.getValue("currencies").add(buildJsonObject {
+      put("id", "cur-2"); put("user_id", USER_ID); put("updated_at", "2026-08-23T11:00:00Z")
+    })
+    val outcome = engine(api).sync() as SyncOutcome.Completed
+    assertTrue(outcome.pullFailed)
+    assertTrue(db.currencyDao().getAll(USER_ID).isEmpty())
+    assertEquals(null, db.syncMetaDao().get(USER_ID, "currencies"))
+    api.removeCurrency("cur-2")
+    assertTrue((engine(api).sync() as SyncOutcome.Completed).isClean)
+    assertEquals(1, db.currencyDao().getAll(USER_ID).size)
+  }
+
+  @Test
+  fun `newly queued mutation stores the exact payload version locally`() = runTest {
+    val entity = CurrencyEntity("cur-1", USER_ID, "USD", "$", "Local", false, "2026-08-23T09:00:00Z", "2026-08-23T09:00:00Z")
+    db.currencyDao().upsert(entity)
+    val payload = OutboxWriter.currency(USER_ID, entity)
+    OutboxWriter.enqueue(db, USER_ID, "currencies", OutboxAction.UPDATE, payload)
+    assertEquals(payload["sync_version"]!!.jsonPrimitive.content, db.currencyDao().getById(USER_ID, "cur-1")!!.syncVersion)
+  }
+
+  @Test
+  fun `canonical server winner is applied before acknowledgment removes queue item`() = runTest {
+    val fake = FakeSyncApi()
+    val canonical = buildJsonObject {
+      currencyPayload("cur-1", "Server winner").forEach { (key,value) -> put(key,value) }
+      put("updated_at", "2026-08-23T11:00:00Z")
+    }
+    val api = object : SyncApi by fake {
+      override suspend fun applyMutation(table: String, action: OutboxAction, payload: JsonObject, keyColumn: String, conflictColumn: String, operationId: String) =
+        MutationResult("stale", canonical)
+    }
+    db.outboxDao().insert(OutboxWriter.newOp(USER_ID, "currencies", OutboxAction.UPDATE, currencyPayload("cur-1", "Old local")))
+    engine(api).sync()
+    assertTrue(db.outboxDao().getAllForOwner(USER_ID).isEmpty())
+    assertEquals("Server winner", db.currencyDao().getById(USER_ID, "cur-1")?.name)
+  }
+
+  @Test
+  fun `transaction category colors and goal complete undo converge after failed run and restart`() = runTest {
+    val currencies = com.joeabouserhal.financetracker.data.repositories.CurrencyRepository(db.currencyDao(), db)
+    val categories = com.joeabouserhal.financetracker.data.repositories.CategoryRepository(db.categoryDao(), db)
+    val transactions = com.joeabouserhal.financetracker.data.repositories.TransactionRepository(db.transactionDao(), db.categoryDao(), categories, db.goalDao(), db)
+    val goals = com.joeabouserhal.financetracker.data.repositories.GoalRepository(db.goalDao(), categories, transactions, db)
+    currencies.add(USER_ID, "USD", "$", "Dollar")
+    val currency = db.currencyDao().getAll(USER_ID).single()
+    val account = db.accountDao().getAll(USER_ID).single()
+    val first = categories.add(USER_ID, "First", com.joeabouserhal.financetracker.data.local.entities.TransactionType.INCOME, "#123456")
+    val second = categories.add(USER_ID, "Second", com.joeabouserhal.financetracker.data.local.entities.TransactionType.EXPENSE, "#234567")
+    val goal = goals.add(USER_ID, "Goal", 5000, currency.id, account.id)
+    val tx = transactions.add(USER_ID, com.joeabouserhal.financetracker.data.local.entities.TransactionType.INCOME, 10000, currency.id, first.id, account.id, null, null, null, null)
+    categories.update(USER_ID, first.id, first.name, first.type, "#345678")
+    categories.update(USER_ID, second.id, second.name, second.type, "#456789")
+    goals.complete(USER_ID, goal.id, mapOf(account.id to 5000L))
+    goals.markActive(USER_ID, goal.id)
+
+    val api = FakeSyncApi().apply { failUpsertFor = "transactions" }
+    assertTrue(!(engine(api).sync() as SyncOutcome.Completed).isClean)
+    assertTrue(db.outboxDao().getAllForOwner(USER_ID).isNotEmpty())
+    api.failUpsertFor = null
+    // A fresh engine represents process restart. Retry must not resurrect the
+    // undone withdrawal, even if its delete succeeded before the failed insert.
+    val tombstones = mutableSetOf<String>()
+    // The real RPC retains delete-before-insert tombstones; simulate that part.
+    api.deleted.forEach { (table,id) -> tombstones.add("$table/$id") }
+    val guarded = object : SyncApi by api {
+      override suspend fun applyMutation(table: String, action: OutboxAction, payload: JsonObject, keyColumn: String, conflictColumn: String, operationId: String): MutationResult? {
+        val id = payload[keyColumn]!!.jsonPrimitive.content
+        if ("$table/$id" in tombstones) return MutationResult("deleted", null)
+        api.applyMutation(table, action, payload, keyColumn, conflictColumn, operationId)
+        return null
+      }
+    }
+    assertTrue((engine(guarded).sync() as SyncOutcome.Completed).isClean)
+    assertTrue(db.outboxDao().getAllForOwner(USER_ID).isEmpty())
+    assertEquals(listOf(tx.id), db.transactionDao().getAll(USER_ID).map { it.id })
+    assertEquals(false, db.goalDao().getById(USER_ID, goal.id)!!.completed)
+    assertEquals("#345678", db.categoryDao().getById(USER_ID, first.id)!!.color)
+    assertEquals("#456789", db.categoryDao().getById(USER_ID, second.id)!!.color)
   }
 }

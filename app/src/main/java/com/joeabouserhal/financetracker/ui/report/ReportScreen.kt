@@ -1,381 +1,324 @@
 package com.joeabouserhal.financetracker.ui.report
 
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.tween
-import androidx.compose.animation.expandVertically
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.material3.minimumInteractiveComponentSize
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
+import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.listSaver
 import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.PathEffect
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.joeabouserhal.financetracker.data.local.entities.CurrencyEntity
 import com.joeabouserhal.financetracker.data.local.entities.TransactionType
 import com.joeabouserhal.financetracker.data.repositories.TransactionListItem
 import com.joeabouserhal.financetracker.data.repositories.enrichTransactions
-import com.joeabouserhal.financetracker.data.session.Session
 import com.joeabouserhal.financetracker.theme.LocalThemeSpec
-import com.joeabouserhal.financetracker.ui.components.BrButton
-import com.joeabouserhal.financetracker.ui.components.BrButtonStyle
-import com.joeabouserhal.financetracker.ui.components.BrSegmentedToggle
-import com.joeabouserhal.financetracker.ui.components.BrTextField
-import com.joeabouserhal.financetracker.ui.components.EmptyState
-import com.joeabouserhal.financetracker.ui.components.ScreenHeader
+import com.joeabouserhal.financetracker.ui.components.*
 import com.joeabouserhal.financetracker.ui.rememberAppContainer
-import com.joeabouserhal.financetracker.ui.transactions.FilterPanel
-import com.joeabouserhal.financetracker.ui.transactions.TransactionFilterState
-import com.joeabouserhal.financetracker.ui.transactions.TransactionFilterStateSaver
-import com.joeabouserhal.financetracker.ui.transactions.TransactionFiltering
-import com.joeabouserhal.financetracker.ui.transactions.TypeFilter
-import com.joeabouserhal.financetracker.ui.transactions.parseCategoryColor
+import com.joeabouserhal.financetracker.ui.transactions.*
 import com.joeabouserhal.financetracker.utils.Money
 import kotlinx.coroutines.flow.combine
+import java.time.LocalDate
+import java.time.YearMonth
+import java.time.format.DateTimeFormatter
+import java.util.Locale
 
-/** One category's share of the selected view, for the donut + breakdown. */
-private data class CategorySlice(
-  val name: String,
-  val color: androidx.compose.ui.graphics.Color,
-  val amountMinor: Long,
-  val count: Int,
+private val PeriodSaver = listSaver<ReportPeriod, String>(
+  save = { listOf(it.kind.name, it.month.toString(), it.custom?.start?.toString().orEmpty(), it.custom?.end?.toString().orEmpty()) },
+  restore = { values -> ReportPeriod(ReportPeriodKind.valueOf(values[0]), YearMonth.parse(values[1]),
+    if (values[2].isNotEmpty()) ReportWindow(LocalDate.parse(values[2]), LocalDate.parse(values[3])) else null) },
 )
 
-/** Aggregated report numbers for one currency (after filters). */
-private data class CurrencyReport(
-  val code: String,
-  val name: String,
-  val symbol: String,
-  val incomeMinor: Long,
-  val expenseMinor: Long,
-  val expenseSlices: List<CategorySlice>,
-  val incomeSlices: List<CategorySlice>,
-  val count: Int,
-)
+internal fun ReportPeriod.label(today: LocalDate): String = when (kind) {
+  ReportPeriodKind.ALL -> "All time"
+  ReportPeriodKind.MONTH -> if (month == YearMonth.from(today)) "This month" else month.format(DateTimeFormatter.ofPattern("MMM yyyy"))
+  ReportPeriodKind.CUSTOM -> requireNotNull(custom).label()
+}
+
+internal fun ReportWindow.label(): String {
+  val format = DateTimeFormatter.ofPattern("d MMM yyyy")
+  return if (start == end) start.format(format) else "${start.format(format)} – ${end.format(format)}"
+}
 
 @Composable
 fun ReportScreen(modifier: Modifier = Modifier) {
   val container = rememberAppContainer()
-  val spec = LocalThemeSpec.current
-  val session by container.sessionManager.session.collectAsStateWithLifecycle(initialValue = Session())
-  val ownerId = session.ownerId
-
-  var filters by rememberSaveable(stateSaver = TransactionFilterStateSaver) { mutableStateOf(TransactionFilterState()) }
-  var filtersOpen by rememberSaveable { mutableStateOf(false) }
-  var viewType by rememberSaveable { mutableStateOf(TransactionType.EXPENSE) }
-
-  val items by remember(ownerId) {
+  val session by container.sessionManager.session.collectAsStateWithLifecycle(initialValue = null)
+  val owner = session?.ownerId ?: return
+  var today by remember { mutableStateOf(LocalDate.now()) }
+  LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { today = LocalDate.now() }
+  val data by remember(owner) {
     combine(
-      container.transactionRepository.observeAll(ownerId),
-      container.categoryRepository.observeByType(ownerId, TransactionType.INCOME),
-      container.categoryRepository.observeByType(ownerId, TransactionType.EXPENSE),
-      container.accountRepository.observeActive(ownerId),
-      container.currencyRepository.observeAll(ownerId),
-    ) { txs, incomeCategories, expenseCategories, accounts, currencies ->
-      enrichTransactions(txs, incomeCategories + expenseCategories, accounts, currencies)
+      container.transactionRepository.observeAll(owner),
+      container.categoryRepository.observeByType(owner, TransactionType.INCOME),
+      container.categoryRepository.observeByType(owner, TransactionType.EXPENSE),
+      container.accountRepository.observeActive(owner),
+      container.currencyRepository.observeAll(owner),
+    ) { transactions, income, expense, accounts, currencies ->
+      owner to Triple(enrichTransactions(transactions, income + expense, accounts, currencies), currencies, accounts)
     }
-  }.collectAsStateWithLifecycle(initialValue = emptyList())
-
-  val currencies by remember(ownerId) { container.currencyRepository.observeAll(ownerId) }
-    .collectAsStateWithLifecycle(initialValue = emptyList())
-  val accounts by remember(ownerId) { container.accountRepository.observeActive(ownerId) }
-    .collectAsStateWithLifecycle(initialValue = emptyList())
-
-  // Same normalization as the Transactions page: stale currency/account ids
-  // in the saved filter state get repaired.
-  LaunchedEffect(currencies, accounts) {
-    if (currencies.isEmpty()) return@LaunchedEffect
-    val selectedIds =
-      if (filters.currencyIds.all { id -> currencies.any { it.id == id } }) filters.currencyIds else emptySet()
-    val visibleAccountIds =
-      accounts.filter { selectedIds.isEmpty() || it.currencyId in selectedIds }.map { it.id }.toSet()
-    val accountIds = filters.accountIds.intersect(visibleAccountIds)
-    if (selectedIds != filters.currencyIds || accountIds != filters.accountIds) {
-      filters = filters.copy(currencyIds = selectedIds, accountIds = accountIds)
-    }
+  }.collectAsStateWithLifecycle(initialValue = null)
+  // StateFlow collection may briefly retain the previous flow's value during
+  // an owner switch. Never render that snapshot in the new account partition.
+  val current = data?.takeIf { it.first == owner }?.second
+  if (current == null) {
+    Box(modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text("Loading report…") }
+    return
   }
-
-  val visible = remember(items, filters) { TransactionFiltering.apply(items, filters) }
-  val activeCount = TransactionFiltering.activeCount(filters)
-
-  val reports = remember(visible, currencies) { buildReports(visible, currencies) }
-
-  Column(
-    modifier.fillMaxSize().background(spec.background),
-    verticalArrangement = Arrangement.spacedBy(12.dp),
-  ) {
-    ScreenHeader(title = "Report")
-
-    Column(
-      Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
-      verticalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-      Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-        BrSegmentedToggle(
-          options = listOf("SPENDING", "EARNING"),
-          selectedIndex = if (viewType == TransactionType.EXPENSE) 0 else 1,
-          onSelect = { viewType = if (it == 0) TransactionType.EXPENSE else TransactionType.INCOME },
-          optionColors = listOf(spec.expense, spec.income),
-          modifier = Modifier.weight(1f),
-        )
-        BrButton(
-          text = if (activeCount > 0) "FILTER $activeCount" else "FILTER",
-          onClick = { filtersOpen = !filtersOpen },
-          style = if (filtersOpen || activeCount > 0) BrButtonStyle.SOLID else BrButtonStyle.OUTLINE,
-          compact = true,
-          fillWidth = false,
-          minHeight = 48.dp,
-        )
-      }
-    }
-
-    AnimatedVisibility(
-      visible = filtersOpen,
-      enter = expandVertically(tween(200)) + fadeIn(tween(200)),
-      exit = shrinkVertically(tween(150)) + fadeOut(tween(150)),
-    ) {
-      Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        FilterPanel(
-          filters = filters,
-          onFiltersChange = { filters = it },
-          typeHint = if (viewType == TransactionType.EXPENSE) TypeFilter.EXPENSE else TypeFilter.INCOME,
-          showTypeRow = false,
-        )
-      }
-    }
-
-    if (visible.isEmpty()) {
-      EmptyState(
-        message = if (items.isEmpty()) "No transactions yet — add some to see a report." else "No transactions match your filters.",
-        modifier = Modifier.fillMaxWidth().padding(16.dp),
-      )
-      return@Column
-    }
-
-    Column(
-      Modifier
-        .fillMaxSize()
-        .verticalScroll(rememberScrollState())
-        .padding(horizontal = 16.dp),
-      verticalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-      reports.forEach { report ->
-        ReportCurrencySection(report = report, viewType = viewType)
-      }
-
-      Spacer(Modifier.height(24.dp))
-    }
-  }
+  ReportContent(ownerId = owner, items = current.first, currencies = current.second, today = today,
+    activeAccountCurrencies = current.third.associate { it.id to it.currencyId }, modifier = modifier,
+    refinementPanel = { filters, update, type ->
+      FilterPanel(filters, update, typeHint = type, showTypeRow = false, showDateRow = false, showSortRow = false)
+    })
 }
 
-private fun buildReports(
+/** UI fixture-friendly: no database, navigation, or network dependencies. */
+@Composable
+internal fun ReportContent(
+  ownerId: String,
   items: List<TransactionListItem>,
-  currencies: List<com.joeabouserhal.financetracker.data.local.entities.CurrencyEntity>,
-): List<CurrencyReport> {
-  val currencyById = currencies.associateBy { it.id }
-  return items
-    .groupBy { it.transaction.currencyId }
-    .mapNotNull { (currencyId, currencyItems) ->
-      val currency = currencyById[currencyId] ?: return@mapNotNull null
-      fun slices(type: TransactionType): List<CategorySlice> =
-        currencyItems
-          .filter {
-            it.transaction.type == type ||
-              (type == TransactionType.EXPENSE && it.transaction.type == TransactionType.GOAL)
-          }
-          .groupBy { it.categoryName to it.categoryColor }
-          .map { (key, group) ->
-            CategorySlice(
-              name = key.first,
-              color = parseCategoryColor(key.second),
-              amountMinor = group.sumOf { it.transaction.amount },
-              count = group.size,
-            )
-          }
-          .sortedByDescending { it.amountMinor }
-
-      CurrencyReport(
-        code = currency.code,
-        name = currency.name,
-        symbol = currency.symbol,
-        incomeMinor = currencyItems.filter { it.transaction.type == TransactionType.INCOME }.sumOf { it.transaction.amount },
-        expenseMinor =
-          currencyItems
-            .filter {
-              it.transaction.type == TransactionType.EXPENSE || it.transaction.type == TransactionType.GOAL
-            }
-            .sumOf { it.transaction.amount },
-        expenseSlices = slices(TransactionType.EXPENSE),
-        incomeSlices = slices(TransactionType.INCOME),
-        count = currencyItems.size,
-      )
-    }
-}
-
-@Composable
-private fun ReportCurrencySection(report: CurrencyReport, viewType: TransactionType) {
-  val spec = LocalThemeSpec.current
-  val slices = if (viewType == TransactionType.EXPENSE) report.expenseSlices else report.incomeSlices
-  val total = if (viewType == TransactionType.EXPENSE) report.expenseMinor else report.incomeMinor
-  val label = if (viewType == TransactionType.EXPENSE) "SPENT" else "EARNED"
-
-  Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-      Text(
-        "${report.code} · ${report.name}",
-        style = MaterialTheme.typography.labelSmall,
-        color = spec.muted,
-      )
-      Text(
-        "${report.count} TRANSACTION${if (report.count == 1) "" else "S"}",
-        style = MaterialTheme.typography.labelSmall,
-        color = spec.muted,
-      )
-    }
-
-    // Per-currency totals strip.
-    Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth()) {
-      TotalsTile("IN", report.incomeMinor, report.symbol, spec.income, Modifier.weight(1f))
-      TotalsTile("OUT", report.expenseMinor, report.symbol, spec.expense, Modifier.weight(1f))
-      TotalsTile(
-        "NET",
-        report.incomeMinor - report.expenseMinor,
-        report.symbol,
-        if (report.incomeMinor >= report.expenseMinor) spec.income else spec.expense,
-        Modifier.weight(1f),
-      )
-    }
-
-    if (slices.isEmpty()) {
-      Text(
-        "No ${if (viewType == TransactionType.EXPENSE) "spending" else "earning"} to chart for this currency.",
-        style = MaterialTheme.typography.bodySmall,
-        color = spec.muted,
-      )
-    } else {
-      DonutChart(
-        slices = slices,
-        totalMinor = total,
-        centerLabel = label,
-        symbol = report.symbol,
-        color = if (viewType == TransactionType.EXPENSE) spec.expense else spec.income,
-      )
-
-      // Per-category breakdown under the chart.
-      Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        slices.forEach { slice ->
-          val percent = if (total > 0) slice.amountMinor.toFloat() / total.toFloat() * 100f else 0f
-          Row(
-            Modifier.fillMaxWidth().background(spec.surface).padding(horizontal = 12.dp, vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-          ) {
-            Box(Modifier.size(12.dp).background(slice.color))
-            Spacer(Modifier.width(10.dp))
-            Column(Modifier.weight(1f)) {
-              Text(slice.name, style = MaterialTheme.typography.bodyMedium, color = spec.ink)
-              Text("${slice.count} transaction${if (slice.count == 1) "" else "s"}", style = MaterialTheme.typography.labelSmall, color = spec.muted)
-            }
-            Column(horizontalAlignment = Alignment.End) {
-              Text(Money.format(slice.amountMinor, report.symbol), style = MaterialTheme.typography.bodyMedium, color = spec.ink)
-              Text(
-                "%.1f%%".format(percent),
-                style = MaterialTheme.typography.labelSmall,
-                color = spec.muted,
-              )
-            }
-          }
-        }
-      }
-    }
-  }
-}
-
-@Composable
-private fun TotalsTile(label: String, amountMinor: Long, symbol: String, color: androidx.compose.ui.graphics.Color, modifier: Modifier = Modifier) {
-  val spec = LocalThemeSpec.current
-  Column(
-    modifier.background(spec.surface).padding(horizontal = 10.dp, vertical = 10.dp),
-  ) {
-    Text(label, style = MaterialTheme.typography.labelSmall, color = spec.muted)
-    Text(
-      Money.format(amountMinor, symbol),
-      style = MaterialTheme.typography.bodyMedium,
-      color = color,
-      fontWeight = FontWeight.Bold,
-    )
-  }
-}
-
-/** Donut chart with a small gap between slices and the total in the middle. */
-@Composable
-private fun DonutChart(
-  slices: List<CategorySlice>,
-  totalMinor: Long,
-  centerLabel: String,
-  symbol: String,
-  color: androidx.compose.ui.graphics.Color,
+  currencies: List<CurrencyEntity>,
+  today: LocalDate,
+  activeAccountCurrencies: Map<String, String> = emptyMap(),
+  modifier: Modifier = Modifier,
+  refinementPanel: @Composable (TransactionFilterState, (TransactionFilterState) -> Unit, TypeFilter) -> Unit = { _, _, _ -> },
 ) {
   val spec = LocalThemeSpec.current
-  Box(Modifier.fillMaxWidth().height(196.dp), contentAlignment = Alignment.Center) {
-    Canvas(Modifier.size(178.dp)) {
-      val strokeWidth = 24.dp.toPx()
-      val inset = strokeWidth / 2f + 2.dp.toPx()
-      val arcSize = Size(size.width - inset * 2, size.height - inset * 2)
-      val topLeft = Offset(inset, inset)
-      var startAngle = -90f
-      slices.forEach { slice ->
-        val sweep = if (totalMinor > 0) slice.amountMinor.toFloat() / totalMinor.toFloat() * 360f else 0f
-        if (sweep > 0f) {
-          drawArc(
-            color = slice.color,
-            startAngle = startAngle,
-            sweepAngle = (sweep - 1.5f).coerceAtLeast(0.5f),
-            useCenter = false,
-            topLeft = topLeft,
-            size = arcSize,
-            style = Stroke(width = strokeWidth, cap = StrokeCap.Butt),
-          )
+  var savedOwner by rememberSaveable { mutableStateOf(ownerId) }
+  var period by rememberSaveable(stateSaver = PeriodSaver) { mutableStateOf(ReportPeriod(month = YearMonth.from(today))) }
+  var filters by rememberSaveable(stateSaver = TransactionFilterStateSaver) { mutableStateOf(TransactionFilterState()) }
+  var viewType by rememberSaveable { mutableStateOf(TransactionType.EXPENSE) }
+  var filtersOpen by rememberSaveable { mutableStateOf(false) }
+  var periodOpen by rememberSaveable { mutableStateOf(false) }
+  var expanded by rememberSaveable { mutableStateOf(emptyList<String>()) }
+  var detailCurrency by rememberSaveable { mutableStateOf<String?>(null) }
+  var detailCategory by rememberSaveable { mutableStateOf<String?>(null) }
+  if (savedOwner != ownerId) {
+    savedOwner = ownerId
+    period = ReportPeriod(month = YearMonth.from(today))
+    filters = TransactionFilterState()
+    viewType = TransactionType.EXPENSE
+    filtersOpen = false
+    periodOpen = false
+    expanded = emptyList()
+    detailCurrency = null
+    detailCategory = null
+  }
+  LaunchedEffect(currencies, activeAccountCurrencies) {
+    val currencyIds = filters.currencyIds.intersect(currencies.map { it.id }.toSet())
+    val accounts = activeAccountCurrencies.filterValues { currencyIds.isEmpty() || it in currencyIds }.keys
+    filters = filters.copy(currencyIds = currencyIds, accountIds = filters.accountIds.intersect(accounts))
+  }
+  val reports = remember(items, currencies, filters, period, viewType, today) {
+    buildReports(items, currencies, viewType, period, filters, today)
+  }
+  val activeCount = reportRefinementCount(filters)
+  val listState = key(ownerId) { rememberLazyListState() }
+  val tone = if (viewType == TransactionType.EXPENSE) spec.expense else spec.income
+  LazyColumn(state = listState, modifier = modifier.fillMaxSize().background(spec.background).testTag("report-list"),
+    contentPadding = PaddingValues(bottom = 28.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    item("header") { ScreenHeader(title = "Report") }
+    item("period") {
+      Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+        if (period.kind == ReportPeriodKind.MONTH) {
+          PeriodArrow("Previous month", "‹") { period = period.copy(month = period.month.minusMonths(1)); expanded = emptyList() }
         }
-        startAngle += sweep
+        Column(Modifier.weight(1f).clickable(role = Role.Button) { periodOpen = true }.padding(horizontal = 8.dp, vertical = 8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+          Text(period.label(today), style = MaterialTheme.typography.titleMedium, color = spec.ink)
+          Text(if (period.kind == ReportPeriodKind.MONTH && period.month == YearMonth.from(today)) "Through ${today.format(DateTimeFormatter.ofPattern("d MMM"))} · Change range" else "Change range",
+            style = MaterialTheme.typography.bodySmall, color = spec.muted)
+        }
+        if (period.kind == ReportPeriodKind.MONTH) {
+          PeriodArrow("Next month", "›", enabled = period.month < YearMonth.from(today)) { period = period.copy(month = period.month.plusMonths(1)); expanded = emptyList() }
+        }
       }
     }
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-      Text(centerLabel, style = MaterialTheme.typography.labelSmall, color = spec.muted)
-      Text(
-        Money.format(totalMinor, symbol),
-        style = MaterialTheme.typography.titleLarge,
-        color = color,
-        fontWeight = FontWeight.Bold,
+    item("controls") {
+      ReportControls(
+        viewType = viewType, filtersOpen = filtersOpen, activeCount = activeCount,
+        onToggleFilters = { filtersOpen = !filtersOpen },
+        onSelect = { next ->
+          if (next != viewType) { viewType = next; filters = filters.copy(categoryIds = emptySet()); expanded = emptyList() }
+        },
       )
     }
+    if (filtersOpen) item("filters") {
+      refinementPanel(filters, { filters = it; expanded = emptyList() }, if (viewType == TransactionType.EXPENSE) TypeFilter.EXPENSE else TypeFilter.INCOME)
+    }
+    if (reports.isEmpty()) item("empty") {
+      EmptyState(if (items.isEmpty()) "No transactions yet — add some to see a report."
+        else "No ${if (viewType == TransactionType.EXPENSE) "spending" else "earning"} in this range${if (activeCount > 0) " with these filters" else ""}.", Modifier.padding(16.dp))
+    }
+    reports.forEachIndexed { index, report ->
+      if (index > 0) item("divider:${report.currencyId}") { ReportDivider(Modifier.padding(horizontal = 16.dp, vertical = 6.dp)) }
+      item("summary:${report.currencyId}") { ReportHeadline(report, viewType, period, today) }
+      item("chart:${report.currencyId}") { key(period, viewType, filters) { TrendChart(report, tone, Modifier.padding(horizontal = 16.dp)) } }
+      item("categories:${report.currencyId}") { Text("BY CATEGORY", style = MaterialTheme.typography.labelSmall, color = spec.muted, modifier = Modifier.padding(start = 16.dp, top = 4.dp)) }
+      val shown = if (report.currencyId in expanded) report.categories else report.categories.take(5)
+      items(shown, key = { "category:${report.currencyId}:${it.id}" }) { category ->
+        CategoryReportRow(category, report.symbol, Modifier.padding(horizontal = 16.dp)) { detailCurrency = report.currencyId; detailCategory = category.id }
+      }
+      if (report.categories.size > 5) item("expand:${report.currencyId}") {
+        Text(if (report.currencyId in expanded) "Show less" else "Show all categories (${report.categories.size})", style = MaterialTheme.typography.labelMedium, color = spec.accent,
+          modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp).clickable(role = Role.Button) {
+            expanded = if (report.currencyId in expanded) expanded - report.currencyId else expanded + report.currencyId
+          }.padding(vertical = 14.dp))
+      }
+    }
+  }
+  if (periodOpen) ReportPeriodDialog(period, today, onDismiss = { periodOpen = false }, onSelect = { period = it; periodOpen = false; expanded = emptyList() })
+  if (detailCategory != null) {
+    val report = reports.firstOrNull { it.currencyId == detailCurrency }
+    val category = report?.categories?.firstOrNull { it.id == detailCategory }
+    CategoryDetailsDialog(category, report?.symbol.orEmpty(), period.label(today), onDismiss = { detailCategory = null; detailCurrency = null })
+  }
+}
+
+@Composable
+private fun ReportControls(viewType: TransactionType, filtersOpen: Boolean, activeCount: Int, onToggleFilters: () -> Unit, onSelect: (TransactionType) -> Unit) {
+  val spec = LocalThemeSpec.current
+  val toggle: @Composable (Modifier) -> Unit = { modifier ->
+        BrSegmentedToggle(options = listOf("SPENDING", "EARNING"), selectedIndex = if (viewType == TransactionType.EXPENSE) 0 else 1,
+          onSelect = { onSelect(if (it == 0) TransactionType.EXPENSE else TransactionType.INCOME) }, optionColors = listOf(spec.expense, spec.income), modifier = modifier)
+  }
+  val filter: @Composable () -> Unit = {
+        BrButton(if (activeCount > 0) "FILTER $activeCount" else "FILTER", onClick = onToggleFilters,
+          style = if (filtersOpen || activeCount > 0) BrButtonStyle.SOLID else BrButtonStyle.OUTLINE, compact = true, fillWidth = false, minHeight = 48.dp)
+  }
+  BoxWithConstraints(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
+    if (maxWidth / LocalDensity.current.fontScale < 280.dp) {
+      Column(verticalArrangement = Arrangement.spacedBy(8.dp), horizontalAlignment = Alignment.End) {
+        toggle(Modifier.fillMaxWidth())
+        filter()
+      }
+    } else Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+      toggle(Modifier.weight(1f))
+      filter()
+    }
+  }
+}
+
+@Composable
+private fun PeriodArrow(description: String, glyph: String, enabled: Boolean = true, onClick: () -> Unit) {
+  val spec = LocalThemeSpec.current
+  Box(Modifier.size(48.dp).semantics { contentDescription = description }.clickable(enabled = enabled, role = Role.Button, onClick = onClick), contentAlignment = Alignment.Center) {
+    Text(glyph, fontSize = 26.sp, color = if (enabled) spec.ink else spec.muted.copy(alpha = 0.4f))
+  }
+}
+
+@Composable
+private fun ReportHeadline(report: CurrencyReport, viewType: TransactionType, period: ReportPeriod, today: LocalDate) {
+  val spec = LocalThemeSpec.current
+  val tone = if (viewType == TransactionType.EXPENSE) spec.expense else spec.income
+  Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+    Text("${report.code} · ${report.name}", style = MaterialTheme.typography.labelMedium, color = spec.muted)
+    Text(if (viewType == TransactionType.EXPENSE) "TOTAL SPENT" else "TOTAL EARNED", style = MaterialTheme.typography.labelSmall, color = spec.muted)
+    Text(compactCurrencyText(report.totalMinor, report.symbol), style = MaterialTheme.typography.headlineLarge, color = tone, fontWeight = FontWeight.Bold)
+    Text("${report.count} transaction${if (report.count == 1) "" else "s"}", style = MaterialTheme.typography.bodySmall, color = spec.muted)
+    if (report.previousTotalMinor != null) {
+      val comparisonLabel = if (period.kind == ReportPeriodKind.MONTH && period.month == YearMonth.from(today)) "same period last month" else if (period.kind == ReportPeriodKind.MONTH) "last month" else "previous period"
+      val change = report.changePercent
+      Text(when {
+        change == null -> "No previous activity"
+        kotlin.math.abs(change) < 0.05 -> "Unchanged vs $comparisonLabel"
+        else -> "${String.format(Locale.getDefault(), "%.1f", kotlin.math.abs(change))}% ${if (change > 0) "more" else "less"} vs $comparisonLabel"
+      }, style = MaterialTheme.typography.bodySmall, color = spec.muted)
+    }
+  }
+}
+
+@Composable
+private fun TrendChart(report: CurrencyReport, tone: Color, modifier: Modifier = Modifier) {
+  val spec = LocalThemeSpec.current
+  var selected by rememberSaveable(report.currencyId) { mutableStateOf<Int?>(null) }
+  val buckets = report.buckets
+  val selectedBucket = selected?.let { buckets.getOrNull(it) }
+  val maximum = buckets.maxOfOrNull { it.amountMinor }?.coerceAtLeast(1L) ?: 1L
+  Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+    Row(Modifier.fillMaxWidth().height(120.dp).testTag("trend:${report.currencyId}"), horizontalArrangement = Arrangement.spacedBy(2.dp), verticalAlignment = Alignment.Bottom) {
+      buckets.forEachIndexed { index, bucket ->
+        val fraction = (bucket.amountMinor.toDouble() / maximum).toFloat().coerceIn(0f, 1f)
+        Box(Modifier.weight(1f).fillMaxHeight().testTag("bucket:${report.currencyId}:$index").semantics { contentDescription = "${bucket.window.label()}: ${Money.format(bucket.amountMinor, report.symbol)}" }
+          .clickable(role = Role.Button) { selected = index }, contentAlignment = Alignment.BottomCenter) {
+          Box(Modifier.widthIn(max = 14.dp).fillMaxWidth().height(if (fraction == 0f) 1.dp else maxOf(2.dp, 112.dp * fraction))
+            .background(if (fraction == 0f) spec.border.copy(alpha = 0.35f) else tone.copy(alpha = if (selected == null || selected == index) 1f else 0.35f)))
+        }
+      }
+    }
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+      val dateFormat = DateTimeFormatter.ofPattern("d MMM yy")
+      Text(buckets.firstOrNull()?.window?.start?.format(dateFormat).orEmpty(), style = MaterialTheme.typography.labelSmall, color = spec.muted)
+      Text(buckets.lastOrNull()?.window?.end?.format(dateFormat).orEmpty(), style = MaterialTheme.typography.labelSmall, color = spec.muted)
+    }
+    Text(selectedBucket?.let { "${it.window.label()} · ${Money.format(it.amountMinor, report.symbol)}" } ?: "Tap a bar to inspect activity", style = MaterialTheme.typography.bodySmall, color = spec.muted, modifier = Modifier.heightIn(min = 32.dp))
+  }
+}
+
+@Composable
+private fun CategoryReportRow(category: CategoryReport, symbol: String, modifier: Modifier, onClick: () -> Unit) {
+  val spec = LocalThemeSpec.current
+  val color = parseCategoryColor(category.color)
+  Column(modifier.fillMaxWidth().background(spec.surface).clickable(role = Role.Button, onClick = onClick).padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+      Box(Modifier.size(10.dp).background(color))
+      Text(category.name, style = MaterialTheme.typography.bodyMedium, color = spec.ink, modifier = Modifier.weight(1f))
+      Text(String.format(Locale.getDefault(), "%.1f%%", category.share * 100), style = MaterialTheme.typography.labelSmall, color = spec.muted)
+    }
+    Text(compactCurrencyText(category.amountMinor, symbol), style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold, color = spec.ink)
+    Box(Modifier.fillMaxWidth().height(3.dp).background(spec.border.copy(alpha = 0.18f))) {
+      Box(Modifier.fillMaxWidth(category.share.toFloat().coerceIn(0f, 1f)).fillMaxHeight().background(color))
+    }
+  }
+}
+
+@Composable
+internal fun CategoryDetailsDialog(category: CategoryReport?, symbol: String, periodLabel: String, onDismiss: () -> Unit) {
+  val spec = LocalThemeSpec.current
+  val bodyHeight = (LocalConfiguration.current.screenHeightDp.dp * 0.52f).coerceAtMost(460.dp)
+  BrDialog(title = category?.name ?: "Category details", onDismiss = onDismiss, dismissText = "CLOSE", wide = true) {
+    LazyColumn(Modifier.fillMaxWidth().heightIn(max = bodyHeight).testTag("category-transactions")) {
+      item("summary") {
+        Column(Modifier.fillMaxWidth().padding(bottom = 14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+          Text(periodLabel, style = MaterialTheme.typography.bodySmall, color = spec.muted)
+          if (category != null) {
+            Text(compactCurrencyText(category.amountMinor, symbol), style = MaterialTheme.typography.titleLarge, color = spec.ink)
+            Text("${String.format(Locale.getDefault(), "%.1f%%", category.share * 100)} of total · ${category.transactions.size} transactions", style = MaterialTheme.typography.bodySmall, color = spec.muted)
+          } else Text("No matching transactions remain in this report.", style = MaterialTheme.typography.bodyMedium, color = spec.muted)
+        }
+      }
+      itemsIndexed(category?.transactions.orEmpty(), key = { _, it -> it.transaction.id }) { index, transaction ->
+        Column { if (index > 0) TransactionDashedDivider(); TransactionRow(transaction, onPress = null) }
+      }
+    }
+  }
+}
+
+@Composable
+private fun ReportDivider(modifier: Modifier = Modifier) {
+  val color = LocalThemeSpec.current.border.copy(alpha = 0.65f)
+  Canvas(modifier.fillMaxWidth().height(1.dp)) {
+    drawLine(color, Offset(0f, size.height / 2), Offset(size.width, size.height / 2), strokeWidth = 1.dp.toPx(), pathEffect = PathEffect.dashPathEffect(floatArrayOf(4.dp.toPx(), 4.dp.toPx())))
   }
 }

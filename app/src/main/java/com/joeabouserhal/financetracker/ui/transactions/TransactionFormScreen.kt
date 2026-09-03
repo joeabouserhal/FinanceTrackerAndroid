@@ -9,6 +9,7 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
@@ -33,12 +34,10 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.DatePicker
-import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -57,7 +56,6 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.window.Dialog
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.joeabouserhal.financetracker.R
@@ -67,6 +65,7 @@ import com.joeabouserhal.financetracker.data.session.Session
 import com.joeabouserhal.financetracker.theme.LocalThemeSpec
 import com.joeabouserhal.financetracker.ui.components.BrButton
 import com.joeabouserhal.financetracker.ui.components.BrChip
+import com.joeabouserhal.financetracker.ui.components.BrDialog
 import com.joeabouserhal.financetracker.ui.components.BrSegmentedToggle
 import com.joeabouserhal.financetracker.ui.components.BrTextField
 import com.joeabouserhal.financetracker.ui.components.ThousandsSeparatorTransformation
@@ -327,46 +326,52 @@ fun TransactionFormScreen(
         modifier = Modifier.fillMaxWidth(),
       )
 
-      SectionLabel("CURRENCY")
-      Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-        currencyOptions.forEach { currency ->
-          BrChip(
-            currency.code,
-            selected = selectedCurrencyId == currency.id,
-            large = true,
-            onClick = {
-              selectedCurrencyId = currency.id
-              val forCurrency = accounts.filter { it.currencyId == currency.id }
-              selectedAccountId = forCurrency.firstOrNull { it.isDefault }?.id ?: forCurrency.firstOrNull()?.id
-            },
-          )
-        }
-      }
-
-      SectionLabel("ACCOUNT")
-      if (accountOptions.isEmpty()) {
-        Text("No accounts for this currency", style = MaterialTheme.typography.labelSmall, color = spec.muted)
-      } else {
+      Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+        SectionLabel("CURRENCY")
         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-          accountOptions.forEach { account ->
-            BrChip(account.name, selected = selectedAccountId == account.id, large = true, onClick = { selectedAccountId = account.id })
+          currencyOptions.forEach { currency ->
+            BrChip(
+              currency.code,
+              selected = selectedCurrencyId == currency.id,
+              large = true,
+              onClick = {
+                selectedCurrencyId = currency.id
+                val forCurrency = accounts.filter { it.currencyId == currency.id }
+                selectedAccountId = forCurrency.firstOrNull { it.isDefault }?.id ?: forCurrency.firstOrNull()?.id
+              },
+            )
           }
         }
       }
 
-      SectionLabel("CATEGORY")
-      Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.horizontalScroll(rememberScrollState())) {
-        BrChip("ALL ▸", selected = false, onClick = { categorySearch = ""; showCategoryModal = true })
-        orderedCategories.take(6).forEach { category ->
-          BrChip(
-            category.name,
-            selected = selectedCategoryId == category.id,
-            onClick = { selectedCategoryId = category.id },
-            colorDot = parseCategoryColor(category.color),
-          )
+      Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+        SectionLabel("ACCOUNT")
+        if (accountOptions.isEmpty()) {
+          Text("No accounts for this currency", style = MaterialTheme.typography.labelSmall, color = spec.muted)
+        } else {
+          Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            accountOptions.forEach { account ->
+              BrChip(account.name, selected = selectedAccountId == account.id, large = true, onClick = { selectedAccountId = account.id })
+            }
+          }
         }
-        if (orderedCategories.size > 6) {
-          BrChip("+${orderedCategories.size - 6}", selected = false, onClick = { categorySearch = ""; showCategoryModal = true })
+      }
+
+      Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+        SectionLabel("CATEGORY")
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.horizontalScroll(rememberScrollState())) {
+          BrChip("ALL ▸", selected = false, onClick = { categorySearch = ""; showCategoryModal = true })
+          orderedCategories.take(6).forEach { category ->
+            BrChip(
+              category.name,
+              selected = selectedCategoryId == category.id,
+              onClick = { selectedCategoryId = category.id },
+              colorDot = parseCategoryColor(category.color),
+            )
+          }
+          if (orderedCategories.size > 6) {
+            BrChip("+${orderedCategories.size - 6}", selected = false, onClick = { categorySearch = ""; showCategoryModal = true })
+          }
         }
       }
 
@@ -424,7 +429,7 @@ fun TransactionFormScreen(
   }
 
   if (showDeleteConfirm && transactionId != null) {
-    com.joeabouserhal.financetracker.ui.components.BrDialog(
+    BrDialog(
       title = "DELETE TRANSACTION?",
       onDismiss = { showDeleteConfirm = false },
       confirmText = "DELETE",
@@ -446,22 +451,16 @@ fun TransactionFormScreen(
   }
 
   if (showCategoryModal) {
-    Dialog(onDismissRequest = { showCategoryModal = false }) {
+    BrDialog(
+      title = "All categories",
+      onDismiss = { showCategoryModal = false },
+      dismissText = null,
+      wide = true,
+    ) {
       Column(
-        Modifier
-          .fillMaxWidth()
-          .background(spec.surface)
-          .padding(16.dp),
+        Modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(10.dp),
       ) {
-        Row(
-          Modifier.fillMaxWidth(),
-          horizontalArrangement = Arrangement.SpaceBetween,
-          verticalAlignment = Alignment.CenterVertically,
-        ) {
-          Text("ALL CATEGORIES", style = MaterialTheme.typography.labelLarge, color = spec.ink)
-          Text("✕", style = MaterialTheme.typography.labelLarge, color = spec.muted, modifier = Modifier.clickable { showCategoryModal = false }.padding(4.dp))
-        }
         BrTextField(
           value = categorySearch,
           onValueChange = { categorySearch = it },
@@ -473,17 +472,23 @@ fun TransactionFormScreen(
           Text("No categories match", style = MaterialTheme.typography.labelSmall, color = spec.muted)
         } else {
           val listState = rememberLazyListState()
-          Box(Modifier.fillMaxWidth().heightIn(max = 480.dp)) {
-            LazyColumn(Modifier.fillMaxWidth(), state = listState) {
+          Box(Modifier.fillMaxWidth().heightIn(max = 380.dp)) {
+            LazyColumn(
+              Modifier.fillMaxWidth(),
+              state = listState,
+              contentPadding = PaddingValues(vertical = 5.dp),
+              verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
               items(filtered, key = { it.id }) { category ->
                 Row(
                   Modifier
                     .fillMaxWidth()
+                    .background(if (selectedCategoryId == category.id) spec.surfaceAlt else spec.surface)
                     .clickable {
                       selectedCategoryId = category.id
                       showCategoryModal = false
                     }
-                    .padding(vertical = 10.dp),
+                    .padding(horizontal = 10.dp, vertical = 9.dp),
                   verticalAlignment = Alignment.CenterVertically,
                 ) {
                   Box(
@@ -531,21 +536,19 @@ fun TransactionFormScreen(
 
   if (showDatePicker) {
     val datePickerState = rememberDatePickerState(initialSelectedDateMillis = LocalDate.parse(date).atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli())
-    DatePickerDialog(
-      onDismissRequest = { showDatePicker = false },
-      confirmButton = {
-        TextButton(onClick = {
-          datePickerState.selectedDateMillis?.let { millis ->
-            date = Instant.ofEpochMilli(millis).atZone(ZoneOffset.UTC).toLocalDate().toString()
-          }
-          showDatePicker = false
-        }) { Text("OK") }
+    BrDialog(
+      title = "Choose date",
+      onDismiss = { showDatePicker = false },
+      confirmText = "Apply",
+      onConfirm = {
+        datePickerState.selectedDateMillis?.let { millis ->
+          date = Instant.ofEpochMilli(millis).atZone(ZoneOffset.UTC).toLocalDate().toString()
+        }
+        showDatePicker = false
       },
-      dismissButton = {
-        TextButton(onClick = { showDatePicker = false }) { Text("CANCEL") }
-      },
+      wide = true,
     ) {
-      DatePicker(state = datePickerState)
+      DatePicker(state = datePickerState, modifier = Modifier.fillMaxWidth())
     }
   }
 }

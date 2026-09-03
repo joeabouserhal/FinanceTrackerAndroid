@@ -24,8 +24,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.window.Dialog
 import com.joeabouserhal.financetracker.theme.LocalThemeSpec
+import com.joeabouserhal.financetracker.ui.components.BrDialog
 import java.time.YearMonth
 
 /** Year + month picker used by the dashboard ACTIVITY section. */
@@ -40,23 +40,15 @@ fun MonthPickerDialog(
   val monthNames =
     listOf("JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC")
 
-  Dialog(onDismissRequest = onDismiss) {
+  BrDialog(
+    title = "Pick month",
+    onDismiss = onDismiss,
+    dismissText = null,
+  ) {
     Column(
-      Modifier
-        .fillMaxWidth()
-        .background(spec.surface)
-        .padding(16.dp),
+      Modifier.fillMaxWidth(),
       verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-      Row(
-        Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically,
-      ) {
-        Text("PICK MONTH", style = MaterialTheme.typography.labelLarge, color = spec.ink)
-        Text("✕", style = MaterialTheme.typography.labelLarge, color = spec.muted, modifier = Modifier.clickable(onClick = onDismiss).padding(4.dp))
-      }
-
       // ------------------------------------------------------------------ YEAR
       Text("YEAR", style = MaterialTheme.typography.labelSmall, color = spec.muted)
       Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.horizontalScroll(rememberScrollState())) {

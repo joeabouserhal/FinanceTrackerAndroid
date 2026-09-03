@@ -3,6 +3,10 @@ package com.joeabouserhal.financetracker.ui.main
 import androidx.activity.ComponentActivity
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.assertIsDisplayed
+import com.joeabouserhal.financetracker.theme.FinanceTrackerTheme
+import com.joeabouserhal.financetracker.theme.ThemeCatalog
 import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
@@ -14,13 +18,11 @@ class MainScreenTest {
 
   @Before
   fun setup() {
-    composeTestRule.setContent { MainScreen(FAKE_DATA) }
+    composeTestRule.setContent { FinanceTrackerTheme(ThemeCatalog.DarkBrutalist) { MainScreen(onItemClick = {}) } }
   }
 
   @Test
-  fun firstItem_exists() {
-    FAKE_DATA.forEach { composeTestRule.onNodeWithText("Hello $it!").assertExists() }
+  fun everyThemeAppearsInTheComponentShowcase() {
+    ThemeCatalog.all.forEach { composeTestRule.onNodeWithText(it.name.uppercase()).performScrollTo().assertIsDisplayed() }
   }
 }
-
-private val FAKE_DATA = listOf("Sample1", "Sample2", "Sample3")

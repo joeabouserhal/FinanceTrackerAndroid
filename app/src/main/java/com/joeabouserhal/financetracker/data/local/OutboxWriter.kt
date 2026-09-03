@@ -36,6 +36,17 @@ object OutboxWriter {
     payload: JsonObject,
   ) {
     if (ownerId == GUEST_OWNER_ID) return
+    val spec = com.joeabouserhal.financetracker.data.sync.SyncTables.ALL.firstOrNull { it.name == table }
+      ?: error("Unknown sync table: $table")
+    val key = if (table == "profiles") "owner_id" else "id"
+    val id = (payload[spec.keyColumn] as? JsonPrimitive)?.content ?: error("Missing sync row id")
+    val version = (payload["sync_version"] as? JsonPrimitive)?.content ?: error("Missing sync version")
+    // Store exactly the version in the immutable payload, in the same local
+    // transaction. Pulls must not overwrite a newer edit while push is running.
+    db.openHelper.writableDatabase.execSQL(
+      "UPDATE `$table` SET sync_version=? WHERE owner_id=? AND `$key`=?",
+      arrayOf(version, ownerId, id),
+    )
     db.outboxDao().insert(newOp(ownerId, table, action, payload))
     // Tell the Application layer a mutation just happened → immediate sync.
     com.joeabouserhal.financetracker.data.sync.SyncRequests.notifyMutation()

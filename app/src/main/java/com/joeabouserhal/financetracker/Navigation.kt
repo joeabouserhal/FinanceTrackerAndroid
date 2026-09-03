@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
@@ -47,21 +48,22 @@ import kotlinx.coroutines.launch
  * Auth, the transaction form, and account screens are pushed on top.
  */
 @Composable
-fun MainNavigation() {
+fun MainNavigation(onReady: () -> Unit = {}) {
   val container = rememberAppContainer()
   val scope = rememberCoroutineScope()
   val session by container.sessionManager.session.collectAsStateWithLifecycle(initialValue = null)
-  val authComplete by container.sessionManager.authChoiceCompleted.collectAsStateWithLifecycle(initialValue = false)
+  val authComplete by container.sessionManager.authChoiceCompleted.collectAsStateWithLifecycle(initialValue = null)
 
   val currentSession = session
-  if (currentSession == null) {
+  if (currentSession == null || authComplete == null) {
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
       Text("FINANCE TRACKER", style = MaterialTheme.typography.headlineMedium)
     }
     return
   }
 
-  val needsAuth = currentSession.isGuest && !authComplete
+  SideEffect { onReady() }
+  val needsAuth = currentSession.isGuest && authComplete != true
   val initial: NavKey = if (needsAuth) AuthFlow else Main
 
   key(initial) {

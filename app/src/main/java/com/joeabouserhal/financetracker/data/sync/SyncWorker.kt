@@ -27,8 +27,8 @@ class SyncWorker(appContext: Context, params: WorkerParameters) : CoroutineWorke
   override suspend fun doWork(): Result {
     val app = applicationContext as? FinanceTrackerApplication ?: return Result.success()
     return when (val outcome = app.container.syncEngine.sync()) {
-      is SyncOutcome.Skipped -> Result.success()
-      // Dead ops (given up) don't force a retry: only live failures do.
+      is SyncOutcome.Skipped -> if (outcome.reason == SyncOutcome.SkipReason.NO_SESSION) Result.retry() else Result.success()
+      // Validation failures remain visible and are retried on manual/periodic runs.
       is SyncOutcome.Completed -> if (outcome.failedOps == 0 && !outcome.pullFailed) Result.success() else Result.retry()
     }
   }
@@ -72,9 +72,9 @@ class SyncScheduler(private val context: Context) {
         .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 30, TimeUnit.SECONDS)
         .build()
     // Never cancel an in-flight push: each request is idempotent, but keeping
-    // the active worker avoids unnecessary duplicate network work and keeps a
-    // multi-row local transaction from being observed half-synced remotely.
-    workManager.enqueueUniqueWork(SyncWorker.NOW_WORK, ExistingWorkPolicy.KEEP, request)
+    // the active worker avoids duplicate network work and ensures follow-up
+    // requests run after it has finished.
+    workManager.enqueueUniqueWork(SyncWorker.NOW_WORK, ExistingWorkPolicy.APPEND_OR_REPLACE, request)
   }
 
   /** Sign-out: stop both periodic and pending on-demand syncs. */

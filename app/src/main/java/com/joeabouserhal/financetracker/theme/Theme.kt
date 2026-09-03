@@ -6,6 +6,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Shapes
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
@@ -20,12 +21,13 @@ import com.joeabouserhal.financetracker.data.settings.ThemeSelection
  * changes.
  */
 @Composable
-fun FinanceTrackerTheme(content: @Composable () -> Unit) {
+fun FinanceTrackerTheme(onReady: () -> Unit = {}, content: @Composable () -> Unit) {
   val app = LocalContext.current.applicationContext as FinanceTrackerApplication
   val selection by app.container.settingsRepository.themeSelection.collectAsStateWithLifecycle(
-    initialValue = ThemeSelection(),
+    initialValue = null,
   )
-  FinanceTrackerTheme(spec = resolveSpec(selection), content = content)
+  if (selection != null) SideEffect { onReady() }
+  FinanceTrackerTheme(spec = resolveSpec(selection ?: ThemeSelection()), content = content)
 }
 
 /** Preview/test-friendly overload: render a fixed spec directly. */
@@ -51,9 +53,11 @@ fun FinanceTrackerTheme(spec: ThemeSpec, content: @Composable () -> Unit) {
 }
 
 @Composable
-fun resolveSpec(selection: ThemeSelection): ThemeSpec =
+fun resolveSpec(selection: ThemeSelection): ThemeSpec = resolveSpec(selection, isSystemInDarkTheme())
+
+fun resolveSpec(selection: ThemeSelection, systemDark: Boolean): ThemeSpec =
   when (selection.mode) {
-    ThemeMode.SYSTEM -> if (isSystemInDarkTheme()) ThemeCatalog.DarkBrutalist else ThemeCatalog.LightBrutalist
+    ThemeMode.SYSTEM -> if (systemDark) ThemeCatalog.DarkBrutalist else ThemeCatalog.LightBrutalist
     ThemeMode.DARK -> ThemeCatalog.DarkBrutalist
     ThemeMode.LIGHT -> ThemeCatalog.LightBrutalist
     ThemeMode.CUSTOM -> ThemeCatalog.byId(selection.specId ?: ThemeCatalog.DarkBrutalist.id)

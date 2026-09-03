@@ -27,6 +27,9 @@ interface OutboxDao {
   @Query("UPDATE outbox SET attempts = :attempts WHERE id = :id")
   suspend fun updateAttempts(id: Long, attempts: Int)
 
+  @Query("UPDATE outbox SET attempts = attempts + 1, last_error = :message, error_kind = :kind, last_attempt_at = :at WHERE id = :id")
+  suspend fun recordFailure(id: Long, message: String, kind: String, at: String)
+
   @Query("DELETE FROM outbox WHERE id = :id")
   suspend fun deleteById(id: Long)
 

@@ -8,6 +8,10 @@ import com.joeabouserhal.financetracker.data.local.entities.OutboxAction
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.coroutines.CancellationException
 
 /**
  * PostgREST-backed [SyncApi]. Every request is scoped by RLS (auth.uid() =
@@ -23,13 +27,19 @@ class SupabaseSyncApi(private val client: SupabaseClient?) : SyncApi {
     val c = client ?: return false
     return try {
       if (c.auth.currentSessionOrNull() == null) c.auth.loadFromStorage()
-      if (c.auth.currentSessionOrNull() == null) c.auth.refreshCurrentSession()
+      val session = c.auth.currentSessionOrNull() ?: return false
+      if (session.expiresAt.epochSeconds <= System.currentTimeMillis() / 1000 + 60) c.auth.refreshCurrentSession()
       c.auth.currentSessionOrNull() != null
+    } catch (e: CancellationException) {
+      throw e
     } catch (e: Exception) {
       android.util.Log.w("SyncEngine", "ensureAuthenticated failed: ${e.message}", e)
-      false
+      throw e
     }
   }
+
+  override suspend fun ensureAuthenticatedFor(ownerId: String): Boolean =
+    ensureAuthenticated() && requireClient().auth.currentUserOrNull()?.id == ownerId
 
   override suspend fun upsert(table: String, payload: JsonObject, onConflict: String) {
     requireClient().postgrest.from(table).upsert(JsonArray(listOf(payload))) {
@@ -51,7 +61,7 @@ class SupabaseSyncApi(private val client: SupabaseClient?) : SyncApi {
     keyColumn: String,
     conflictColumn: String,
     operationId: String,
-  ) {
+  ): MutationResult {
     val params =
       JsonObject(
         mapOf(
@@ -62,7 +72,15 @@ class SupabaseSyncApi(private val client: SupabaseClient?) : SyncApi {
           "p_operation_id" to JsonPrimitive(operationId),
         ),
       )
-    requireClient().postgrest.rpc("apply_sync_mutation", params)
+    val result = requireClient().postgrest.rpc("apply_sync_mutation", params).decodeAs<JsonObject>()
+    val status = result["status"]?.jsonPrimitive?.contentOrNull
+    check(result["protocol"]?.jsonPrimitive?.contentOrNull == "2" && status in setOf("applied", "stale", "deleted")) {
+      "Unverified sync acknowledgment"
+    }
+    check(result["id"] == payload[keyColumn] && result["table"] == JsonPrimitive(table)) { "Sync acknowledgment identity mismatch" }
+    val row = result["row"]?.takeIf { it != JsonNull } as? JsonObject
+    check(status == "deleted" || row != null) { "Sync acknowledgment has no canonical row" }
+    return MutationResult(status!!, row)
   }
 
   override suspend fun pullRows(

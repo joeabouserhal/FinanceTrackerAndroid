@@ -35,8 +35,9 @@ import com.joeabouserhal.financetracker.data.local.entities.TransactionEntity
       ProfileEntity::class,
       OutboxEntity::class,
       SyncMetaEntity::class,
+      com.joeabouserhal.financetracker.data.local.entities.SyncHealthEntity::class,
     ],
-  version = 10,
+  version = 11,
   exportSchema = true,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -49,6 +50,7 @@ abstract class AppDatabase : RoomDatabase() {
   abstract fun profileDao(): ProfileDao
   abstract fun outboxDao(): OutboxDao
   abstract fun syncMetaDao(): SyncMetaDao
+  abstract fun syncHealthDao(): com.joeabouserhal.financetracker.data.local.dao.SyncHealthDao
 }
 
 /** Migration registry. Every schema change must add an entry here and bump [AppDatabase.version]. */
@@ -180,6 +182,10 @@ object Migrations {
       }
     }
 
+  val MIGRATION_10_11 = object : Migration(10, 11) {
+    override fun migrate(db: SupportSQLiteDatabase) = SyncRecoveryMigration.migrate(db)
+  }
+
   val ALL: Array<Migration> =
-    arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10)
+    arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11)
 }

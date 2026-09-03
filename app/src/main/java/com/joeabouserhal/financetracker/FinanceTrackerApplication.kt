@@ -7,8 +7,13 @@ import com.joeabouserhal.financetracker.data.sync.SyncVersion
 import com.joeabouserhal.financetracker.di.AppContainer
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.launch
 
+@OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class, kotlinx.coroutines.FlowPreview::class)
 class FinanceTrackerApplication : Application() {
   lateinit var container: AppContainer
     private set
@@ -37,15 +42,17 @@ class FinanceTrackerApplication : Application() {
       }
     }
 
-    // Mutation trigger: every add/edit/delete calls OutboxWriter.enqueue in
-    // the same Room transaction, which fires SyncRequests. Collect it and
-    // request a sync immediately — deterministic, no Room-flow timing
-    // involved. WorkManager coalesces bursts via APPEND_OR_REPLACE. Guest
-    // mutations never enqueue, so guests never trigger.
+    // Observe committed outbox changes. A signal inside a transaction could
+    // start a worker before commit, and KEEP then dropped follow-up requests.
+    // Only new IDs trigger work: attempt/error updates cannot make a retry loop.
     container.applicationScope.launch {
-      com.joeabouserhal.financetracker.data.sync.SyncRequests.mutations.collectLatest {
-        android.util.Log.i("SyncTrigger", "mutation queued — requesting sync")
-        container.syncScheduler.requestSyncNow()
+      var previousIds = emptySet<Long>()
+      container.sessionManager.session.flatMapLatest { active ->
+        container.appDatabase.outboxDao().observeForOwner(active.ownerId)
+          .map { ops -> if (active.isGuest) emptySet<Long>() else ops.map { it.id }.toSet() }
+      }.distinctUntilChanged().debounce(250).collectLatest { ids ->
+        if (ids.any { it !in previousIds }) container.syncScheduler.requestSyncNow()
+        previousIds = ids
       }
     }
   }

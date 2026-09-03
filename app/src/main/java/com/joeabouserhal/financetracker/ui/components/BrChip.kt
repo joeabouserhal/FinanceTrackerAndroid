@@ -29,6 +29,7 @@ fun BrChip(
   modifier: Modifier = Modifier,
   colorDot: Color? = null,
   large: Boolean = false,
+  comfortable: Boolean = false,
   suffix: String? = null,
 ) {
   val spec = LocalThemeSpec.current
@@ -43,27 +44,34 @@ fun BrChip(
         .border(spec.borderWidth, if (selected) spec.accent else spec.border)
         .clickable(onClick = onClick)
         .padding(
-          horizontal = if (large) 16.dp else 10.dp,
-          vertical = if (large) 12.dp else 6.dp,
+          horizontal = when {
+            large -> 16.dp
+            comfortable -> 12.dp
+            else -> 10.dp
+          },
+          vertical = when {
+            large -> 12.dp
+            comfortable -> 7.dp
+            else -> 6.dp
+          },
         ),
     verticalAlignment = Alignment.CenterVertically,
   ) {
     if (colorDot != null) {
-      Box(Modifier.size(if (large) 14.dp else 12.dp).background(colorDot))
+      Box(Modifier.size(if (large) 14.dp else if (comfortable) 13.dp else 12.dp).background(colorDot))
       Spacer(Modifier.width(6.dp))
     }
     Text(
       text = text.uppercase(),
       style = if (large) MaterialTheme.typography.labelLarge else MaterialTheme.typography.labelMedium,
       color = content,
-      modifier = Modifier.alignByBaseline(),
     )
     if (suffix != null) {
+      Spacer(Modifier.width(4.dp))
       Text(
         text = "(${suffix.uppercase()})",
         style = MaterialTheme.typography.labelSmall,
         color = if (selected) content.copy(alpha = 0.72f) else spec.muted,
-        modifier = Modifier.alignByBaseline(),
       )
     }
   }

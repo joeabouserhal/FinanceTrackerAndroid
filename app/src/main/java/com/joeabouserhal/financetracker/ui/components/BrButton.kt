@@ -1,7 +1,5 @@
 package com.joeabouserhal.financetracker.ui.components
 
-import androidx.compose.animation.core.animateDpAsState
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -13,7 +11,6 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.defaultMinSize
@@ -33,9 +30,7 @@ import com.joeabouserhal.financetracker.theme.LocalThemeSpec
 enum class BrButtonStyle { SOLID, OUTLINE, INK, DANGER }
 
 /**
- * Chunky brutalist button with an offset hard shadow and mono label.
- * The face Box measures normally (fillMaxWidth + padding), so the button
- * always has real height; only the shadow layer uses matchParentSize.
+ * Direct brutalist button with a single bordered face and mono label.
  * Pass [iconRes] to show a small leading icon (e.g. the Google G).
  */
 @Composable
@@ -70,32 +65,22 @@ fun BrButton(
       BrButtonStyle.DANGER -> spec.expense
       else -> face
     }
-  val shadowColor = if (style == BrButtonStyle.DANGER) spec.expense else spec.border
-  val hasShadow = enabled && style != BrButtonStyle.OUTLINE
   val interactionSource = remember { MutableInteractionSource() }
   val pressed by interactionSource.collectIsPressedAsState()
-  val faceOffset by animateDpAsState(
-    targetValue = if (pressed && enabled) spec.shadowOffset else 0.dp,
-    animationSpec = tween(70),
-    label = "buttonPress",
-  )
 
-  // Reserve space on the bottom/right so a parent cannot crop the hard shadow.
-  Box(modifier.padding(end = if (hasShadow) spec.shadowOffset else 0.dp, bottom = if (hasShadow) spec.shadowOffset else 0.dp)) {
-    if (hasShadow) {
-      Box(
-        Modifier
-          .matchParentSize()
-          .offset(spec.shadowOffset, spec.shadowOffset)
-          .background(shadowColor),
-      )
-    }
+  Box(modifier) {
     Box(
       Modifier
         .then(if (fillWidth) Modifier.fillMaxWidth() else Modifier)
-        .offset(faceOffset, faceOffset)
         .defaultMinSize(minHeight = minHeight ?: if (compact) 42.dp else 50.dp)
-        .background(if (enabled) face else spec.surfaceAlt)
+        .background(
+          when {
+            !enabled -> spec.surfaceAlt
+            pressed && style == BrButtonStyle.OUTLINE -> spec.surfaceAlt
+            pressed -> face.copy(alpha = 0.82f)
+            else -> face
+          },
+        )
         .border(spec.borderWidth, if (enabled) borderColor else spec.muted)
         .clickable(
           interactionSource = interactionSource,

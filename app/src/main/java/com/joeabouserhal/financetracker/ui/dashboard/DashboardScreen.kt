@@ -42,6 +42,7 @@ import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.joeabouserhal.financetracker.data.repositories.CurrencyBalance
 import com.joeabouserhal.financetracker.data.repositories.DashboardData
@@ -55,7 +56,9 @@ import com.joeabouserhal.financetracker.ui.components.BrChip
 import com.joeabouserhal.financetracker.ui.components.ExpandableFab
 import com.joeabouserhal.financetracker.ui.components.EmptyState
 import com.joeabouserhal.financetracker.ui.components.ScreenHeader
+import com.joeabouserhal.financetracker.ui.components.compactCurrencyText
 import com.joeabouserhal.financetracker.ui.rememberAppContainer
+import com.joeabouserhal.financetracker.ui.transactions.TransactionDashedDivider
 import com.joeabouserhal.financetracker.ui.transactions.TransactionRow
 import com.joeabouserhal.financetracker.utils.Dates
 import com.joeabouserhal.financetracker.utils.Money
@@ -231,7 +234,7 @@ private fun CurrencyBalanceBlock(balance: CurrencyBalance) {
       Row {
         Text(
           balance.currency.symbol,
-          style = MaterialTheme.typography.labelLarge,
+          style = MaterialTheme.typography.labelLarge.copy(letterSpacing = 0.sp),
           color = spec.muted,
           modifier = Modifier.alignByBaseline(),
         )
@@ -268,7 +271,7 @@ private fun CurrencyBalanceBlock(balance: CurrencyBalance) {
               label = "accountAmount",
             )
             Text(
-              Money.format(account.balanceMinor, account.currency.symbol),
+              compactCurrencyText(account.balanceMinor, account.currency.symbol),
               style = MaterialTheme.typography.labelMedium,
               color = amountColor,
             )
@@ -399,37 +402,57 @@ private fun ActivityBlock(activity: MonthlyActivity) {
 
     Row(verticalAlignment = Alignment.CenterVertically) {
       Column(Modifier.weight(1f)) {
-        Row(Modifier.fillMaxWidth().height(10.dp)) {
+        Box(Modifier.fillMaxWidth().height(24.dp)) {
+          Row(Modifier.fillMaxSize()) {
+            if (hasExpense) {
+              val expenseFraction = if (hasIncome) 1f - incomeFraction else 1f
+              Box(
+                Modifier
+                  .fillMaxHeight()
+                  .weight(expenseFraction)
+                  .background(spec.expense),
+              )
+            }
+            if (hasIncome) {
+              val incomeShare = if (hasExpense) incomeFraction else 1f
+              Box(
+                Modifier
+                  .fillMaxHeight()
+                  .weight(incomeShare)
+                  .background(spec.income),
+              )
+            }
+          }
           if (hasExpense) {
-            val expenseFraction = if (hasIncome) 1f - incomeFraction else 1f
-            Box(
-              Modifier
-                .fillMaxHeight()
-                .weight(expenseFraction)
-                .background(spec.expense)
-                .padding(horizontal = 4.dp),
+            Text(
+              "$expensePct%",
+              style = MaterialTheme.typography.labelSmall,
+              color = spec.background,
+              fontWeight = FontWeight.Bold,
+              maxLines = 1,
+              modifier = Modifier.align(Alignment.CenterStart).padding(horizontal = 6.dp),
             )
           }
           if (hasIncome) {
-            val incomeShare = if (hasExpense) incomeFraction else 1f
-            Box(
-              Modifier
-                .fillMaxHeight()
-                .weight(incomeShare)
-                .background(spec.income)
-                .padding(horizontal = 4.dp),
+            Text(
+              "$incomePct%",
+              style = MaterialTheme.typography.labelSmall,
+              color = spec.background,
+              fontWeight = FontWeight.Bold,
+              maxLines = 1,
+              modifier = Modifier.align(Alignment.CenterEnd).padding(horizontal = 6.dp),
             )
           }
         }
         Spacer(Modifier.height(4.dp))
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
           Text(
-            "- ${Money.format(activity.expenseMinor, activity.currency.symbol)} · $expensePct%",
+            compactCurrencyText(activity.expenseMinor, activity.currency.symbol, prefix = "-\u2009"),
             style = MaterialTheme.typography.labelMedium,
             color = spec.expense,
           )
           Text(
-            "+ ${Money.format(activity.incomeMinor, activity.currency.symbol)} · $incomePct%",
+            compactCurrencyText(activity.incomeMinor, activity.currency.symbol, prefix = "+\u2009"),
             style = MaterialTheme.typography.labelMedium,
             color = spec.income,
           )
@@ -447,8 +470,13 @@ private fun RecentSection(
 ) {
   Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
     SectionLabel("RECENT")
-    recent.forEach { item ->
-      TransactionRow(item = item, onPress = { onEdit(item.transaction.id) })
+    Column {
+      recent.forEachIndexed { index, item ->
+        TransactionRow(item = item, onPress = { onEdit(item.transaction.id) })
+        if (index < recent.lastIndex) {
+          TransactionDashedDivider()
+        }
+      }
     }
     BrButton(
       text = "VIEW MORE",

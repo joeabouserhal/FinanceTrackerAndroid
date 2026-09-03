@@ -13,6 +13,8 @@ interface SyncApi {
   /** True when a usable authenticated session is available (refreshing if needed). */
   suspend fun ensureAuthenticated(): Boolean
 
+  suspend fun ensureAuthenticatedFor(ownerId: String): Boolean = ensureAuthenticated()
+
   /** Idempotent push: full-row upsert keyed on the row id. */
   suspend fun upsert(table: String, payload: JsonObject, onConflict: String)
 
@@ -31,7 +33,7 @@ interface SyncApi {
     keyColumn: String,
     conflictColumn: String,
     operationId: String,
-  ) {
+  ): MutationResult? {
     when (action) {
       OutboxAction.INSERT, OutboxAction.UPDATE -> upsert(table, payload, conflictColumn)
       OutboxAction.DELETE -> {
@@ -40,6 +42,7 @@ interface SyncApi {
         deleteById(table, keyColumn, id)
       }
     }
+    return null
   }
 
   /**
@@ -59,6 +62,8 @@ interface SyncApi {
     const val DEFAULT_PAGE_SIZE: Long = 500
   }
 }
+
+data class MutationResult(val status: String, val row: JsonObject?)
 
 /**
  * FK-safe push/pull order: parents before children. Each table declares its

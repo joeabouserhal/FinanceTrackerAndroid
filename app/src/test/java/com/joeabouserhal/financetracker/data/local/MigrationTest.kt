@@ -1,6 +1,7 @@
 package com.joeabouserhal.financetracker.data.local
 
 import android.content.Context
+import androidx.room.Room
 import androidx.sqlite.db.SupportSQLiteDatabase
 import androidx.sqlite.db.SupportSQLiteOpenHelper
 import androidx.sqlite.db.framework.FrameworkSQLiteOpenHelperFactory
@@ -216,14 +217,14 @@ class MigrationTest {
   // Helpers
   // ---------------------------------------------------------------------------
 
-  /** Opens an in-memory DB and creates every table/index from the exported schema JSON. */
-  private fun openVersion(version: Int): SupportSQLiteDatabase {
+  /** Creates every table/index from the exported schema JSON. */
+  private fun openVersion(version: Int, name: String? = null): SupportSQLiteDatabase {
     val helper =
       FrameworkSQLiteOpenHelperFactory().create(
         SupportSQLiteOpenHelper.Configuration.builder(context)
-          .name(null) // in-memory
+          .name(name) // null keeps ordinary fixtures in memory
           .callback(
-            object : SupportSQLiteOpenHelper.Callback(1) {
+            object : SupportSQLiteOpenHelper.Callback(version) {
               override fun onCreate(db: SupportSQLiteDatabase) = Unit
               override fun onUpgrade(db: SupportSQLiteDatabase, oldVersion: Int, newVersion: Int) = Unit
             },
@@ -247,6 +248,67 @@ class MigrationTest {
       }
     }
     return db
+  }
+
+  @Test
+  fun `Room opens recovery upgrade from a fresh version 10 install`() {
+    assertRoomRecoveryUpgrade(fromVersion = 10)
+  }
+
+  @Test
+  fun `Room opens recovery upgrade from a migrated version 10 install`() {
+    assertRoomRecoveryUpgrade(fromVersion = 9)
+  }
+
+  private fun assertRoomRecoveryUpgrade(fromVersion: Int) {
+    val name = "recovery-${java.util.UUID.randomUUID()}.db"
+    try {
+      openVersion(fromVersion, name).use { legacy ->
+        if (fromVersion == 9) {
+          Migrations.MIGRATION_9_10.migrate(legacy)
+          legacy.version = 10
+        }
+        legacy.execSQL("INSERT INTO profiles(owner_id,name,created_at,updated_at) VALUES('guest','Guest','2026-08-23T09:00:00Z','2026-08-23T09:00:00Z')")
+      }
+      // Use Room's generated validator, not just our schema approximation:
+      // v9 upgrades have an op_id SQL default, while fresh v10 installs do not.
+      val room = Room.databaseBuilder(context, AppDatabase::class.java, name)
+        .addMigrations(Migrations.MIGRATION_10_11)
+        .allowMainThreadQueries()
+        .build()
+      try {
+        room.openHelper.writableDatabase.query("SELECT name FROM profiles WHERE owner_id='guest'").use {
+          assertTrue(it.moveToFirst())
+          assertEquals("Guest", it.getString(0))
+        }
+        assertEquals(11, room.openHelper.writableDatabase.version)
+      } finally {
+        room.close()
+      }
+    } finally {
+      context.deleteDatabase(name)
+    }
+  }
+
+  @Test
+  fun `sync recovery preserves exhausted queue and guests and requeues signed records`() {
+    val db = openVersion(10)
+    db.execSQL("INSERT INTO currencies(id,owner_id,code,symbol,name,is_default,created_at,updated_at,sync_version) VALUES('repair-cur','repair-user','USD','$','Dollar',1,'2026-08-23T09:00:00Z','2026-08-23T09:00:00Z','2026-08-23T09:00:00Z')")
+    db.execSQL("INSERT INTO currencies(id,owner_id,code,symbol,name,is_default,created_at,updated_at,sync_version) VALUES('guest-cur','guest','USD','$','Guest',1,'2026-08-23T09:00:00Z','2026-08-23T09:00:00Z','2026-08-23T09:00:00Z')")
+    val version = "0000001788465000000-000001-test"
+    val payload = """{"id":"repair-cur","user_id":"repair-user","sync_version":"$version"}"""
+    db.execSQL("INSERT INTO outbox(op_id,owner_id,table_name,action,payload_json,created_at,attempts) VALUES('legacy-1','repair-user','currencies','UPDATE',?,'2026-08-23T09:00:00Z',10)", arrayOf(payload))
+    Migrations.MIGRATION_10_11.migrate(db)
+    assertMatchesExportedSchema(db, 11)
+    db.query("SELECT attempts,payload_json,op_id FROM outbox ORDER BY id LIMIT 1").use {
+      assertTrue(it.moveToFirst())
+      assertEquals(10, it.getInt(0))
+      assertEquals(payload, it.getString(1))
+      java.util.UUID.fromString(it.getString(2))
+    }
+    db.query("SELECT COUNT(*) FROM outbox WHERE owner_id='guest'").use { it.moveToFirst(); assertEquals(0, it.getInt(0)) }
+    db.query("SELECT COUNT(*) FROM outbox WHERE owner_id='repair-user'").use { it.moveToFirst(); assertEquals(2, it.getInt(0)) }
+    db.query("SELECT sync_version FROM currencies WHERE id='repair-cur'").use { it.moveToFirst(); assertEquals(version, it.getString(0)) }
   }
 
   /** Approximates Room's MigrationTestHelper validation: columns, types, NOT NULL, PKs. */

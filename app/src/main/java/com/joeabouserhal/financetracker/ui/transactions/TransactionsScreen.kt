@@ -29,7 +29,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.minimumInteractiveComponentSize
@@ -159,8 +159,8 @@ fun TransactionsScreen(
 
     AnimatedVisibility(
       visible = filtersOpen,
-      enter = expandVertically(tween(200)) + fadeIn(tween(200)),
-      exit = shrinkVertically(tween(150)) + fadeOut(tween(150)),
+      enter = expandVertically(tween(200), expandFrom = Alignment.Top) + fadeIn(tween(180)),
+      exit = shrinkVertically(tween(150), shrinkTowards = Alignment.Top) + fadeOut(tween(130)),
     ) {
       FilterPanel(
         filters = filters,
@@ -183,15 +183,17 @@ fun TransactionsScreen(
             item(key = "header-$date") {
               DateHeader(date, groupItems)
             }
-            items(groupItems, key = { it.transaction.id }) { item ->
-              SwipeRevealRow(
-                onDelete = { deleteTarget = item },
-                modifier = Modifier.animateItem(),
-              ) {
-                TransactionRow(
-                  item = item,
-                  onPress = { onEditTransaction(item.transaction.id) },
-                )
+            itemsIndexed(groupItems, key = { _, item -> item.transaction.id }) { index, item ->
+              Column(Modifier.animateItem()) {
+                SwipeRevealRow(onDelete = { deleteTarget = item }) {
+                  TransactionRow(
+                    item = item,
+                    onPress = { onEditTransaction(item.transaction.id) },
+                  )
+                }
+                if (index < groupItems.lastIndex) {
+                  TransactionDashedDivider()
+                }
               }
             }
           }
@@ -199,13 +201,19 @@ fun TransactionsScreen(
       }
     }
     }
-    // The FAB overlays the WHOLE page so expanding the filter panel never
-    // moves it.
-    ExpandableFab(
-      onAddTransaction = onAddTransaction,
-      onAddFromPreset = onAddFromPreset,
+    // Keep the action anchored when collapsed, but remove it entirely while
+    // filters are open so it cannot cover the last filter row.
+    AnimatedVisibility(
+      visible = !filtersOpen,
       modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp),
-    )
+      enter = fadeIn(tween(120)),
+      exit = fadeOut(tween(90)),
+    ) {
+      ExpandableFab(
+        onAddTransaction = onAddTransaction,
+        onAddFromPreset = onAddFromPreset,
+      )
+    }
   }
 
   deleteTarget?.let { item ->

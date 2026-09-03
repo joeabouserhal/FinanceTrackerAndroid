@@ -17,6 +17,11 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
+import java.time.Instant
+import com.joeabouserhal.financetracker.data.local.entities.SyncHealthEntity
 
 sealed interface SyncOutcome {
   enum class SkipReason { GUEST, NOT_CONFIGURED, NO_SESSION }
@@ -30,7 +35,7 @@ sealed interface SyncOutcome {
     val deadOps: Int,
     val pullFailed: Boolean,
   ) : SyncOutcome {
-    val isClean: Boolean get() = failedOps == 0 && !pullFailed
+    val isClean: Boolean get() = failedOps == 0 && deadOps == 0 && !pullFailed
   }
 }
 
@@ -43,7 +48,7 @@ sealed interface SyncOutcome {
  *     time; a successful op is removed from the queue, a failed op keeps its
  *     place and gets its attempt counter bumped.
  *  3. Pull every table with a keyset watermark over (updated_at, id) and apply
- *     rows with last-write-wins (server timestamps are authoritative).
+ *     rows using their hybrid-clock versions; deletion remains permanent.
  */
 class SyncEngine(
   private val db: AppDatabase,
@@ -56,11 +61,9 @@ class SyncEngine(
   companion object {
     private const val TAG = "SyncEngine"
 
-    /** Permanently failing ops stop being retried after this many attempts. */
-    const val MAX_PUSH_ATTEMPTS = 10
   }
 
-  /** Last completed sync outcome — surfaced in Options as sync health. */
+  /** Last completed run for diagnostics; user-facing health is persisted in Room. */
   val latestOutcome = kotlinx.coroutines.flow.MutableStateFlow<SyncOutcome.Completed?>(null)
 
   /** Periodic and foreground workers share this gate so they cannot race the outbox. */
@@ -70,27 +73,50 @@ class SyncEngine(
     val current = session.first()
     if (current.isGuest) return SyncOutcome.Skipped(SyncOutcome.SkipReason.GUEST)
     val syncApi = api ?: return SyncOutcome.Skipped(SyncOutcome.SkipReason.NOT_CONFIGURED)
-    if (!syncApi.ensureAuthenticated()) return SyncOutcome.Skipped(SyncOutcome.SkipReason.NO_SESSION)
+    val priorHealth = db.syncHealthDao().get(current.ownerId)
+    try {
+      if (!syncApi.ensureAuthenticatedFor(current.ownerId)) {
+        db.syncHealthDao().upsert(SyncHealthEntity(current.ownerId, priorHealth?.lastSuccessAt, "Sign in again to resume sync.", "AUTH_REQUIRED"))
+        return SyncOutcome.Skipped(SyncOutcome.SkipReason.NO_SESSION)
+      }
+    } catch (e: CancellationException) {
+      throw e
+    } catch (e: Exception) {
+      val failure = SyncFailure.from(e)
+      db.syncHealthDao().upsert(SyncHealthEntity(current.ownerId, priorHealth?.lastSuccessAt, failure.message, failure.kind))
+      return SyncOutcome.Completed(0, 0, 1, 0, false).also { latestOutcome.value = it }
+    }
 
     var pushed = 0
     var failedOps = 0
     var deadOps = 0
+    var firstFailure: SyncFailure? = null
     for (spec in SyncTables.ALL) {
       for (op in db.outboxDao().getAllForOwnerAndTable(current.ownerId, spec.name)) {
-        if (op.attempts >= MAX_PUSH_ATTEMPTS) {
-          // Permanently failing op (bad FK, server-side rejection, …): keep
-          // it locally so no data is lost, but stop retrying it forever.
-          deadOps++
-          Log.w(TAG, "op ${op.id} (${spec.name}/${op.action}) given up after ${op.attempts} attempts — kept locally")
-          continue
-        }
+        currentCoroutineContext().ensureActive()
+        if (session.first() != current) return SyncOutcome.Skipped(SyncOutcome.SkipReason.NO_SESSION)
         try {
-          pushOp(syncApi, op, spec)
-          db.outboxDao().deleteById(op.id)
+          val result = pushOp(syncApi, op, spec)
+          db.withTransaction {
+            if (result?.row != null) {
+              applyRows(current.ownerId, spec.name, listOf(result.row))
+            } else if (result?.status == "deleted" && spec.name != "profiles") {
+              val payload = Json.parseToJsonElement(op.payloadJson).jsonObject
+              db.openHelper.writableDatabase.execSQL(
+                "UPDATE `${spec.name}` SET deleted_at=coalesce(deleted_at,?) WHERE owner_id=? AND id=?",
+                arrayOf(Instant.now().toString(), current.ownerId, payload.req(spec.keyColumn)),
+              )
+            }
+            db.outboxDao().deleteById(op.id)
+          }
           pushed++
+        } catch (e: CancellationException) {
+          throw e
         } catch (e: Exception) {
-          db.outboxDao().updateAttempts(op.id, op.attempts + 1)
-          failedOps++
+          val failure = SyncFailure.from(e)
+          db.outboxDao().recordFailure(op.id, "${spec.name}: ${failure.message}", failure.kind, Instant.now().toString())
+          if (failure.kind == "RETRYING") failedOps++ else deadOps++
+          if (firstFailure == null) firstFailure = failure
           Log.w(TAG, "push op ${op.id} (${spec.name}/${op.action}) failed: ${e.message}", e)
         }
       }
@@ -99,21 +125,29 @@ class SyncEngine(
     var pulled = 0
     var pullFailed = false
     for (spec in SyncTables.ALL) {
+      currentCoroutineContext().ensureActive()
+      if (session.first() != current) return SyncOutcome.Skipped(SyncOutcome.SkipReason.NO_SESSION)
       try {
         pulled += pullTable(syncApi, current.ownerId, spec)
+      } catch (e: CancellationException) {
+        throw e
       } catch (e: Exception) {
         pullFailed = true
+        if (firstFailure == null) firstFailure = SyncFailure.from(e)
         Log.w(TAG, "pull ${spec.name} failed: ${e.message}", e)
       }
     }
 
     Log.i(TAG, "sync done: pushed=$pushed pulled=$pulled failedOps=$failedOps deadOps=$deadOps pullFailed=$pullFailed")
+    db.syncHealthDao().upsert(
+      SyncHealthEntity(current.ownerId, if (firstFailure == null) Instant.now().toString() else priorHealth?.lastSuccessAt, firstFailure?.message, firstFailure?.kind),
+    )
     return SyncOutcome.Completed(pushed, pulled, failedOps, deadOps, pullFailed).also { latestOutcome.value = it }
   }
 
-  private suspend fun pushOp(api: SyncApi, op: OutboxEntity, spec: SyncTables.Spec) {
+  private suspend fun pushOp(api: SyncApi, op: OutboxEntity, spec: SyncTables.Spec): MutationResult? {
     val payload = Json.parseToJsonElement(op.payloadJson).jsonObject
-    api.applyMutation(op.tableName, op.action, payload, spec.keyColumn, spec.conflictColumn, op.opId)
+    return api.applyMutation(op.tableName, op.action, payload, spec.keyColumn, spec.conflictColumn, op.opId)
   }
 
   /** Returns the number of rows pulled. Advances the watermark only on success. */
@@ -126,22 +160,24 @@ class SyncEngine(
     while (true) {
       val page = api.pullRows(spec.name, ownerId, cursorTs, cursorId, SyncApi.DEFAULT_PAGE_SIZE, spec.keyColumn)
       if (page.isEmpty()) break
-      // A page is a transaction: never advance past a row we could not apply.
-      db.withTransaction { applyRows(ownerId, spec.name, page) }
-      pulled += page.size
       val last = page.last()
       cursorTs = last.req("updated_at")
       cursorId = last.req(spec.keyColumn)
+      // Data and its cursor commit together, one page at a time.
+      db.withTransaction {
+        applyRows(ownerId, spec.name, page)
+        syncMeta.upsert(SyncMetaEntity(ownerId, spec.name, cursorTs, cursorId))
+      }
+      pulled += page.size
       if (page.size < SyncApi.DEFAULT_PAGE_SIZE) break
     }
 
-    if (cursorTs != null) {
-      syncMeta.upsert(SyncMetaEntity(ownerId = ownerId, tableName = spec.name, lastSyncAt = cursorTs, lastSyncId = cursorId))
-    }
     return pulled
   }
 
   private suspend fun applyRows(ownerId: String, table: String, rows: List<JsonObject>) {
+    require(rows.all { it.req("user_id") == ownerId }) { "Sync row owner mismatch" }
+    rows.forEach { row -> (row["sync_version"] as? JsonPrimitive)?.contentOrNull?.let(SyncVersion::observe) }
     when (table) {
       "currencies" -> rows.forEach { row -> applyCurrency(ownerId, SyncMappers.currency(row)) }
       "categories" -> rows.forEach { row -> applyCategory(ownerId, SyncMappers.category(row)) }
@@ -159,7 +195,7 @@ class SyncEngine(
     val local = dao.getById(ownerId, remote.id)
     when {
       local == null -> dao.insertAll(listOf(remote))
-      SyncMappers.remoteAtLeastAsNew(local.syncVersion, remote.syncVersion) -> dao.replaceFromSync(remote)
+      remote.deletedAt != null || SyncMappers.remoteAtLeastAsNew(local.syncVersion, remote.syncVersion) -> dao.replaceFromSync(remote)
     }
   }
 
@@ -168,7 +204,7 @@ class SyncEngine(
     val local = dao.getById(ownerId, remote.id)
     when {
       local == null -> dao.insertAll(listOf(remote))
-      SyncMappers.remoteAtLeastAsNew(local.syncVersion, remote.syncVersion) -> dao.replaceFromSync(remote)
+      remote.deletedAt != null || SyncMappers.remoteAtLeastAsNew(local.syncVersion, remote.syncVersion) -> dao.replaceFromSync(remote)
     }
   }
 
@@ -180,7 +216,7 @@ class SyncEngine(
         dao.insertAll(listOf(remote))
         if (remote.isDefault) dao.clearDefaultExceptForCurrency(ownerId, remote.currencyId, remote.id)
       }
-      SyncMappers.remoteAtLeastAsNew(local.syncVersion, remote.syncVersion) -> {
+      remote.deletedAt != null || SyncMappers.remoteAtLeastAsNew(local.syncVersion, remote.syncVersion) -> {
         dao.replaceFromSync(remote)
         if (remote.isDefault) dao.clearDefaultExceptForCurrency(ownerId, remote.currencyId, remote.id)
       }
@@ -192,7 +228,7 @@ class SyncEngine(
     val local = dao.getById(ownerId, remote.id)
     when {
       local == null -> dao.insertAll(listOf(remote))
-      SyncMappers.remoteAtLeastAsNew(local.syncVersion, remote.syncVersion) -> dao.replaceFromSync(remote)
+      remote.deletedAt != null || SyncMappers.remoteAtLeastAsNew(local.syncVersion, remote.syncVersion) -> dao.replaceFromSync(remote)
     }
   }
 
@@ -201,7 +237,7 @@ class SyncEngine(
     val local = dao.getById(ownerId, remote.id)
     when {
       local == null -> dao.insertAll(listOf(remote))
-      SyncMappers.remoteAtLeastAsNew(local.syncVersion, remote.syncVersion) -> dao.replaceFromSync(remote)
+      remote.deletedAt != null || SyncMappers.remoteAtLeastAsNew(local.syncVersion, remote.syncVersion) -> dao.replaceFromSync(remote)
     }
   }
 
@@ -210,7 +246,7 @@ class SyncEngine(
     val local = dao.getById(ownerId, remote.id)
     when {
       local == null -> dao.insertAll(listOf(remote))
-      SyncMappers.remoteAtLeastAsNew(local.syncVersion, remote.syncVersion) -> dao.replaceFromSync(remote)
+      remote.deletedAt != null || SyncMappers.remoteAtLeastAsNew(local.syncVersion, remote.syncVersion) -> dao.replaceFromSync(remote)
     }
   }
 

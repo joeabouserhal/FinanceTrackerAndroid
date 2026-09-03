@@ -3,6 +3,7 @@ package com.joeabouserhal.financetracker.ui.components
 import androidx.annotation.DrawableRes
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.size
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -40,7 +41,7 @@ fun BrTextField(
   OutlinedTextField(
     value = value,
     onValueChange = onValueChange,
-    modifier = modifier,
+    modifier = modifier.fillMaxWidth(),
     enabled = enabled,
     label = { Text(label, style = MaterialTheme.typography.labelMedium) },
     singleLine = singleLine,

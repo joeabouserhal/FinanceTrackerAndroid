@@ -2,6 +2,7 @@ package com.joeabouserhal.financetracker.data.sync
 
 import android.content.Context
 import java.util.UUID
+import java.util.Locale
 
 /**
  * A small, durable hybrid logical clock used to order edits made while a
@@ -31,17 +32,38 @@ object SyncVersion {
       val millis = maxOf(System.currentTimeMillis(), fallbackMillis)
       fallbackCounter = if (millis == fallbackMillis) fallbackCounter + 1 else 0
       fallbackMillis = millis
-      return "%019d-%06d-%s".format(millis, fallbackCounter, fallbackDeviceId)
+      return String.format(Locale.ROOT, "%019d-%06d-%s", millis, fallbackCounter, fallbackDeviceId)
     }
     val prefs = appContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
     val deviceId = prefs.getString(DEVICE_ID, null) ?: UUID.randomUUID().toString().also {
-      prefs.edit().putString(DEVICE_ID, it).apply()
+      check(prefs.edit().putString(DEVICE_ID, it).commit()) { "Could not persist sync device identity" }
     }
     val wall = System.currentTimeMillis()
     val previousMillis = prefs.getLong(LAST_MILLIS, 0L)
     val millis = maxOf(wall, previousMillis)
     val counter = if (millis == previousMillis) prefs.getInt(LAST_COUNTER, 0) + 1 else 0
-    prefs.edit().putLong(LAST_MILLIS, millis).putInt(LAST_COUNTER, counter).apply()
-    return "%019d-%06d-%s".format(millis, counter, deviceId)
+    check(prefs.edit().putLong(LAST_MILLIS, millis).putInt(LAST_COUNTER, counter).commit()) { "Could not persist sync clock" }
+    return String.format(Locale.ROOT, "%019d-%06d-%s", millis, counter, deviceId)
+  }
+
+  /** A local edit after a remote edit must order after it, even with clock skew. */
+  @Synchronized
+  fun observe(version: String) {
+    if (version.length < 27 || version[19] != '-') return
+    val millis = version.substring(0, 19).toLongOrNull() ?: return
+    val counter = version.substring(20, 26).toIntOrNull() ?: return
+    val appContext = context
+    if (appContext == null) {
+      if (millis > fallbackMillis || (millis == fallbackMillis && counter > fallbackCounter)) {
+        fallbackMillis = millis
+        fallbackCounter = counter
+      }
+      return
+    }
+    val prefs = appContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+    val previousMillis = prefs.getLong(LAST_MILLIS, 0L)
+    if (millis > previousMillis || (millis == previousMillis && counter > prefs.getInt(LAST_COUNTER, 0))) {
+      check(prefs.edit().putLong(LAST_MILLIS, millis).putInt(LAST_COUNTER, counter).commit()) { "Could not persist remote sync clock" }
+    }
   }
 }

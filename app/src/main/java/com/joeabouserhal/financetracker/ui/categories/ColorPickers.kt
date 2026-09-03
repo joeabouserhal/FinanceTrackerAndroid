@@ -35,10 +35,10 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.window.Dialog
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.joeabouserhal.financetracker.theme.LocalThemeSpec
 import com.joeabouserhal.financetracker.ui.components.BrButton
+import com.joeabouserhal.financetracker.ui.components.BrDialog
 import com.joeabouserhal.financetracker.ui.components.BrTextField
 import com.joeabouserhal.financetracker.ui.rememberAppContainer
 import kotlin.math.PI
@@ -128,23 +128,16 @@ fun ColorWheelDialog(
     hexText = selectedHex()
   }
 
-  Dialog(onDismissRequest = onDismiss) {
+  BrDialog(
+    title = "Custom color",
+    onDismiss = onDismiss,
+    dismissText = null,
+    wide = true,
+  ) {
     Column(
-      Modifier
-        .fillMaxWidth()
-        .background(spec.surface)
-        .padding(16.dp),
+      Modifier.fillMaxWidth(),
       verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-      Row(
-        Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically,
-      ) {
-        Text("CUSTOM COLOR", style = MaterialTheme.typography.labelLarge, color = spec.ink)
-        Text("✕", style = MaterialTheme.typography.labelLarge, color = spec.muted, modifier = Modifier.clickable(onClick = onDismiss).padding(4.dp))
-      }
-
       Box(
         Modifier
           .fillMaxWidth()

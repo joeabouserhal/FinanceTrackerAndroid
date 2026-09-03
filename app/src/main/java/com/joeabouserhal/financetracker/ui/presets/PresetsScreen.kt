@@ -6,6 +6,7 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -32,7 +33,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.window.Dialog
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.joeabouserhal.financetracker.data.local.entities.PresetEntity
 import com.joeabouserhal.financetracker.data.local.entities.TransactionType
@@ -323,22 +323,16 @@ private fun PresetDialog(
   }
 
   if (showCategoryModal) {
-    Dialog(onDismissRequest = { showCategoryModal = false }) {
+    BrDialog(
+      title = "All categories",
+      onDismiss = { showCategoryModal = false },
+      dismissText = null,
+      wide = true,
+    ) {
       Column(
-        Modifier
-          .fillMaxWidth()
-          .background(spec.surface)
-          .padding(16.dp),
+        Modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(10.dp),
       ) {
-        Row(
-          Modifier.fillMaxWidth(),
-          horizontalArrangement = Arrangement.SpaceBetween,
-          verticalAlignment = Alignment.CenterVertically,
-        ) {
-          Text("ALL CATEGORIES", style = MaterialTheme.typography.labelLarge, color = spec.ink)
-          Text("✕", style = MaterialTheme.typography.labelLarge, color = spec.muted, modifier = Modifier.clickable { showCategoryModal = false }.padding(4.dp))
-        }
         BrTextField(
           value = categorySearch,
           onValueChange = { categorySearch = it },
@@ -349,16 +343,21 @@ private fun PresetDialog(
         if (filtered.isEmpty()) {
           Text("No categories match", style = MaterialTheme.typography.labelSmall, color = spec.muted)
         } else {
-          LazyColumn(Modifier.fillMaxWidth().heightIn(max = 320.dp)) {
+          LazyColumn(
+            Modifier.fillMaxWidth().heightIn(max = 320.dp),
+            contentPadding = PaddingValues(vertical = 5.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+          ) {
             items(filtered, key = { it.id }) { category ->
               Row(
                 Modifier
                   .fillMaxWidth()
+                  .background(if (categoryId == category.id) spec.surfaceAlt else spec.surface)
                   .clickable {
                     categoryId = category.id
                     showCategoryModal = false
                   }
-                  .padding(vertical = 10.dp),
+                  .padding(horizontal = 10.dp, vertical = 9.dp),
                 verticalAlignment = Alignment.CenterVertically,
               ) {
                 Box(

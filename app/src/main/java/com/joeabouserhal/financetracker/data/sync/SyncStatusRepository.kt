@@ -2,7 +2,7 @@ package com.joeabouserhal.financetracker.data.sync
 
 import androidx.work.WorkInfo
 import com.joeabouserhal.financetracker.data.local.dao.OutboxDao
-import com.joeabouserhal.financetracker.data.local.dao.SyncMetaDao
+import com.joeabouserhal.financetracker.data.local.dao.SyncHealthDao
 import com.joeabouserhal.financetracker.data.session.SessionManager
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
@@ -15,12 +15,17 @@ data class SyncStatus(
   val isSyncing: Boolean = false,
   val pendingCount: Int = 0,
   val lastSyncAt: String? = null,
+  val retryingCount: Int = 0,
+  val actionRequiredCount: Int = 0,
+  val lastError: String? = null,
+  val errorKind: String? = null,
 )
 
+@OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
 class SyncStatusRepository(
   private val sessionManager: SessionManager,
   private val outboxDao: OutboxDao,
-  private val syncMetaDao: SyncMetaDao,
+  private val syncHealthDao: SyncHealthDao,
   private val connectivityMonitor: ConnectivityMonitor,
   private val workInfos: Flow<List<WorkInfo>>,
 ) {
@@ -28,10 +33,10 @@ class SyncStatusRepository(
     sessionManager.session.flatMapLatest { session ->
       combine(
         connectivityMonitor.isOnline,
-        outboxDao.observeCountForOwner(session.ownerId),
-        syncMetaDao.observeLatestForOwner(session.ownerId),
+        outboxDao.observeForOwner(session.ownerId),
+        syncHealthDao.observe(session.ownerId),
         workInfos,
-      ) { online, pending, lastSync, infos ->
+      ) { online, pending, health, infos ->
         SyncStatus(
           isGuest = session.isGuest,
           isOnline = online,
@@ -39,8 +44,12 @@ class SyncStatusRepository(
           // waiting for its next window, or a delayed retry) is idle, not
           // syncing — otherwise the pill would never leave "Syncing…".
           isSyncing = infos.any { it.state == WorkInfo.State.RUNNING },
-          pendingCount = pending,
-          lastSyncAt = lastSync,
+          pendingCount = pending.size,
+          lastSyncAt = health?.lastSuccessAt,
+          retryingCount = pending.count { it.errorKind == "RETRYING" },
+          actionRequiredCount = pending.count { it.errorKind in setOf("ACTION_REQUIRED", "AUTH_REQUIRED") },
+          lastError = pending.firstOrNull { it.lastError != null }?.lastError ?: health?.lastError,
+          errorKind = pending.firstOrNull { it.errorKind != null }?.errorKind ?: health?.errorKind,
         )
       }
     }

@@ -9,7 +9,7 @@ import java.util.UUID
 /** Offline-first mutation queue. Payload is serialized JSON. */
 @Entity(
   tableName = "outbox",
-  indices = [Index("owner_id")],
+  indices = [Index("owner_id"), Index(value = ["op_id"], unique = true)],
 )
 data class OutboxEntity(
   @PrimaryKey(autoGenerate = true) val id: Long = 0,
@@ -20,4 +20,7 @@ data class OutboxEntity(
   @ColumnInfo(name = "payload_json") val payloadJson: String,
   @ColumnInfo(name = "created_at") val createdAt: String,
   val attempts: Int = 0,
+  @ColumnInfo(name = "last_error") val lastError: String? = null,
+  @ColumnInfo(name = "error_kind") val errorKind: String? = null,
+  @ColumnInfo(name = "last_attempt_at") val lastAttemptAt: String? = null,
 )
