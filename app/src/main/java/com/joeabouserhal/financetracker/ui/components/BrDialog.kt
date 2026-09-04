@@ -3,6 +3,8 @@ package com.joeabouserhal.financetracker.ui.components
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -12,6 +14,8 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -40,6 +44,8 @@ fun BrDialog(
   dismissText: String? = "CANCEL",
   /** Pickers can use the extra width while ordinary forms remain focused. */
   wide: Boolean = false,
+  /** Forms can scroll while their title and Save/Cancel actions remain visible. */
+  scrollContent: Boolean = false,
   content: @Composable () -> Unit,
 ) {
   val spec = LocalThemeSpec.current
@@ -47,12 +53,13 @@ fun BrDialog(
 
   Dialog(
     onDismissRequest = onDismiss,
-    properties = DialogProperties(usePlatformDefaultWidth = false),
+    properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = !scrollContent),
   ) {
     Box(
       modifier =
         Modifier
           .fillMaxWidth()
+          .then(if (scrollContent) Modifier.systemBarsPadding().imePadding() else Modifier)
           .padding(horizontal = if (wide) 10.dp else 22.dp, vertical = 24.dp),
       contentAlignment = Alignment.Center,
     ) {
@@ -93,7 +100,9 @@ fun BrDialog(
 
           Box(Modifier.fillMaxWidth().height(1.dp).background(spec.border.copy(alpha = 0.42f)))
           Column(
-            Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 16.dp),
+            Modifier
+              .then(if (scrollContent) Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState()) else Modifier)
+              .fillMaxWidth().padding(horizontal = 16.dp, vertical = 16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
           ) {
             content()

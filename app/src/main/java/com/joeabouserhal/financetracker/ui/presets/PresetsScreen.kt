@@ -8,7 +8,6 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.size
@@ -18,7 +17,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -38,12 +36,10 @@ import com.joeabouserhal.financetracker.data.local.entities.PresetEntity
 import com.joeabouserhal.financetracker.data.local.entities.TransactionType
 import com.joeabouserhal.financetracker.data.session.Session
 import com.joeabouserhal.financetracker.theme.LocalThemeSpec
-import com.joeabouserhal.financetracker.ui.components.BrButton
 import com.joeabouserhal.financetracker.ui.components.BrChip
 import com.joeabouserhal.financetracker.ui.components.BrDialog
 import com.joeabouserhal.financetracker.ui.components.BrSegmentedToggle
 import com.joeabouserhal.financetracker.ui.components.BrTextField
-import com.joeabouserhal.financetracker.ui.components.ScreenHeader
 import com.joeabouserhal.financetracker.ui.rememberAppContainer
 import com.joeabouserhal.financetracker.utils.Money
 import com.joeabouserhal.financetracker.utils.parseHexColor
@@ -69,15 +65,11 @@ fun PresetsScreen(
   val session by container.sessionManager.session.collectAsStateWithLifecycle(initialValue = Session())
   val ownerId = session.ownerId
 
-  var filter by rememberSaveable { mutableStateOf(PresetFilter.ALL) }
+  var filter by rememberSaveable(ownerId) { mutableStateOf(PresetFilter.ALL) }
 
   val filterType = filter.type
-  val presets by remember(ownerId, filter) {
-    if (filterType == null) {
-      container.presetRepository.observeAll(ownerId)
-    } else {
-      container.presetRepository.observeByType(ownerId, filterType)
-    }
+  val presets by remember(ownerId) {
+    container.presetRepository.observeAll(ownerId)
   }.collectAsStateWithLifecycle(initialValue = emptyList())
   val currencies by remember(ownerId) { container.currencyRepository.observeAll(ownerId) }
     .collectAsStateWithLifecycle(initialValue = emptyList())
@@ -91,49 +83,17 @@ fun PresetsScreen(
   var archiving by remember { mutableStateOf<PresetEntity?>(null) }
   var error by remember { mutableStateOf<String?>(null) }
 
-  Column(modifier.fillMaxSize().background(spec.background)) {
-    Row(
-      Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
-      verticalAlignment = Alignment.CenterVertically,
-    ) {
-      Text("< BACK", style = MaterialTheme.typography.labelMedium, color = spec.accent, modifier = Modifier.padding(4.dp).minimumInteractiveComponentSize().clickable(onClick = onBack))
-    }
-    ScreenHeader(title = "Presets", subtitle = "ONE-TAP TEMPLATES FOR THE ADD-TRANSACTION FORM")
-
-    Column(
-      Modifier
-        .fillMaxSize()
-        .verticalScroll(rememberScrollState())
-        .padding(horizontal = 16.dp),
-      verticalArrangement = Arrangement.spacedBy(10.dp),
-    ) {
-      Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-        BrChip("All", selected = filter == PresetFilter.ALL, onClick = { filter = PresetFilter.ALL })
-        BrChip("Expense", selected = filter == PresetFilter.EXPENSE, onClick = { filter = PresetFilter.EXPENSE }, colorDot = spec.expense)
-        BrChip("Income", selected = filter == PresetFilter.INCOME, onClick = { filter = PresetFilter.INCOME }, colorDot = spec.income)
-      }
-
-      error?.let { Text(it, style = MaterialTheme.typography.labelMedium, color = spec.expense) }
-
-      presets.forEach { preset ->
-        PresetRowView(
-          preset,
-          currencies,
-          accounts,
-          categories.filter { it.type == preset.type },
-          onTap = { editing = preset },
-        )
-      }
-
-      BrButton(text = "+ Add preset", onClick = { adding = true })
-    }
-  }
+  PresetLibrary(
+    ownerId, presets, currencies, accounts, categories, filter, { filter = it }, onBack,
+    onSelect = { error = null; editing = it }, modifier = modifier, onAdd = { error = null; adding = true }, error = error,
+  )
 
   if (adding) {
     PresetDialog(
       title = "ADD PRESET",
       initial = null,
       defaultType = filter.type ?: TransactionType.EXPENSE,
+      saveError = error,
       currencies = currencies,
       accounts = accounts,
       categories = categories,
@@ -155,6 +115,7 @@ fun PresetsScreen(
       title = "EDIT PRESET",
       initial = preset,
       defaultType = preset.type,
+      saveError = error,
       currencies = currencies,
       accounts = accounts,
       categories = categories,
@@ -168,7 +129,7 @@ fun PresetsScreen(
           } catch (e: Exception) { error = e.message }
         }
       },
-      onDelete = { archiving = preset },
+      onDelete = { editing = null; error = null; archiving = preset },
     )
   }
 
@@ -179,19 +140,23 @@ fun PresetsScreen(
       confirmText = "DELETE",
       onConfirm = {
         scope.launch {
-          container.presetRepository.archive(ownerId, preset.id)
-          archiving = null
-          editing = null
+          try {
+            container.presetRepository.archive(ownerId, preset.id)
+            archiving = null
+            editing = null
+            error = null
+          } catch (e: Exception) { error = e.message ?: "Could not delete this preset." }
         }
       },
     ) {
       Text("It disappears from the quick-select row but keeps its history.", style = MaterialTheme.typography.bodyMedium)
+      error?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = spec.expense) }
     }
   }
 }
 
 @Composable
-private fun PresetDialog(
+internal fun PresetDialog(
   title: String,
   initial: PresetEntity?,
   defaultType: TransactionType,
@@ -201,6 +166,7 @@ private fun PresetDialog(
   onDismiss: () -> Unit,
   onSave: (name: String, amount: Long?, currencyId: String?, accountId: String?, categoryId: String?, type: TransactionType) -> Unit,
   onDelete: (() -> Unit)? = null,
+  saveError: String? = null,
 ) {
   var name by remember { mutableStateOf(initial?.name ?: "") }
   var amountText by remember { mutableStateOf(initial?.defaultAmount?.let { minor -> if (minor % 100 == 0L) (minor / 100).toString() else "${minor / 100}.${(minor % 100).toString().padStart(2, '0')}" } ?: "") }
@@ -253,7 +219,9 @@ private fun PresetDialog(
   BrDialog(
     title = title,
     onDismiss = onDismiss,
+    scrollContent = true,
     onConfirm = {
+      dialogError = null
       if (name.isBlank()) {
         dialogError = "Preset name is required"
       } else {
@@ -279,11 +247,11 @@ private fun PresetDialog(
       }
       BrTextField(name, { name = it }, "NAME")
       BrTextField(amountText, { amountText = it }, "AMOUNT (OPTIONAL)", keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal))
-      dialogError?.let {
+      (dialogError ?: saveError)?.let {
         Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
       }
       Text("CURRENCY", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-      Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+      Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
         currencies.forEach { c ->
           BrChip(
             c.code,
@@ -298,7 +266,7 @@ private fun PresetDialog(
         }
       }
       Text("ACCOUNT", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-      Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+      Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
         accounts.filter { it.currencyId == currencyId }.forEach { a -> BrChip(a.name, selected = accountId == a.id, large = true, onClick = { accountId = a.id }) }
       }
       Text("CATEGORY", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)

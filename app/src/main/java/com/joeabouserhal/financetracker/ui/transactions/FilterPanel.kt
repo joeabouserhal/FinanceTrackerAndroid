@@ -91,6 +91,7 @@ fun FilterPanel(
   showTypeRow: Boolean = true,
   showDateRow: Boolean = true,
   showSortRow: Boolean = true,
+  showCurrencyRow: Boolean = true,
 ) {
   val spec = LocalThemeSpec.current
   val container = rememberAppContainer()
@@ -151,7 +152,7 @@ fun FilterPanel(
 
   val reportRefinementsOnly = !showTypeRow && !showDateRow && !showSortRow
   val activeCount = if (reportRefinementsOnly) {
-    listOf(filters.categoryIds, filters.accountIds, filters.currencyIds).count { it.isNotEmpty() }
+    listOf(filters.categoryIds, filters.accountIds, if (showCurrencyRow) filters.currencyIds else emptySet()).count { it.isNotEmpty() }
   } else TransactionFiltering.activeCount(filters)
 
   Column(
@@ -176,7 +177,7 @@ fun FilterPanel(
             color = if (activeCount == 0) spec.muted else spec.accent,
           )
         }
-        if (activeCount > 0 || filters.currencyIds.isNotEmpty()) {
+        if (activeCount > 0 || (showCurrencyRow && filters.currencyIds.isNotEmpty())) {
           Text(
             "RESET",
             style = MaterialTheme.typography.labelMedium,
@@ -193,7 +194,7 @@ fun FilterPanel(
                       search = "",
                       categoryIds = emptySet(),
                       accountIds = emptySet(),
-                      currencyIds = emptySet(),
+                      currencyIds = if (showCurrencyRow) emptySet() else filters.currencyIds,
                     ),
                   )
                 }
@@ -232,7 +233,7 @@ fun FilterPanel(
       }
 
       // Currency is a single-select context; accounts are pruned whenever it changes.
-      ChipRow("CURRENCY") {
+      if (showCurrencyRow) ChipRow("CURRENCY") {
         BrChip(
           "ALL",
           selected = filters.currencyIds.isEmpty(),

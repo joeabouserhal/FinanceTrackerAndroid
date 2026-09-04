@@ -21,6 +21,7 @@ import com.joeabouserhal.financetracker.theme.FinanceTrackerTheme
 import com.joeabouserhal.financetracker.theme.ThemeCatalog
 import org.junit.Rule
 import org.junit.Test
+import org.junit.Assert.assertEquals
 import java.time.LocalDate
 import java.io.File
 import android.graphics.Bitmap
@@ -31,8 +32,8 @@ class ReportScreenTest {
   private val owner = mutableStateOf("guest")
   private val shown = mutableStateOf(true)
   private val data = mutableStateOf(fixtures())
-  private val currencies = listOf(CurrencyEntity("USD", "guest", "USD", "$", "US Dollar", true, "", ""),
-    CurrencyEntity("EUR", "guest", "EUR", "€", "Euro", false, "", ""))
+  private var currencies by mutableStateOf(listOf(CurrencyEntity("EUR", "guest", "EUR", "€", "Euro", false, "", ""),
+    CurrencyEntity("USD", "guest", "USD", "$", "US Dollar", true, "", "")))
 
   private fun launch(light: Boolean = false, largeText: Boolean = false) {
     compose.runOnUiThread { compose.activity.window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON) }
@@ -51,6 +52,52 @@ class ReportScreenTest {
   }
 
   private fun scroll(text: String) = compose.onNodeWithTag("report-list").performScrollToNode(hasText(text))
+
+  @Test fun categoryRowsConnectWithDividersIncludingExpandedRows() {
+    launch()
+    compose.onNodeWithTag("report-list").performScrollToKey("category:USD:cat7")
+    val first = compose.onNodeWithTag("report-category:USD:cat7").fetchSemanticsNode().boundsInRoot
+    val second = compose.onNodeWithTag("report-category:USD:cat6").fetchSemanticsNode().boundsInRoot
+    assertEquals(first.bottom, second.top, 0.5f)
+    compose.onNodeWithTag("report-category-divider:USD:cat7").assertDoesNotExist()
+    compose.onNodeWithTag("report-category-divider:USD:cat6").assertIsDisplayed()
+    capture("report-connected-categories-qa.png")
+    scroll("Show all categories (7)")
+    compose.onNodeWithText("Show all categories (7)").performClick()
+    compose.onNodeWithTag("report-list").performScrollToKey("category:USD:cat3")
+    val fifth = compose.onNodeWithTag("report-category:USD:cat3").fetchSemanticsNode().boundsInRoot
+    val sixth = compose.onNodeWithTag("report-category:USD:cat2").fetchSemanticsNode().boundsInRoot
+    assertEquals(fifth.bottom, sixth.top, 0.5f)
+    compose.onNodeWithTag("report-category-divider:USD:cat2").assertIsDisplayed()
+    compose.onNodeWithTag("report-list").performScrollToKey("currency-selector")
+    compose.onNodeWithTag("report-currency:EUR").performClick()
+    compose.onNodeWithTag("report-list").performScrollToKey("category:EUR:cat1")
+    compose.onNodeWithTag("report-category-divider:EUR:cat1").assertDoesNotExist()
+  }
+
+  @Test fun currencySelectorShowsOneReportAndPreservesChoiceAcrossModesAndTabs() {
+    launch()
+    compose.onNodeWithTag("report-currency:USD").assertIsSelected()
+    compose.onNodeWithTag("report-currency:EUR").assertIsNotSelected()
+    compose.onNodeWithTag("report-currency:EUR").performClick()
+    compose.onNodeWithTag("report-currency:EUR").assertIsSelected()
+    scroll("EUR · Euro")
+    compose.onNodeWithText("EUR · Euro").assertIsDisplayed()
+    compose.onNodeWithText("USD · US Dollar").assertDoesNotExist()
+    scroll("EARNING")
+    compose.onNodeWithText("EARNING").performClick()
+    compose.onNodeWithTag("report-currency:EUR").assertIsSelected()
+    scroll("No earning in EUR in this range.")
+    compose.onNodeWithText("No earning in EUR in this range.").assertIsDisplayed()
+    compose.runOnIdle { shown.value = false }
+    compose.runOnIdle { shown.value = true }
+    compose.onNodeWithTag("report-list").performScrollToKey("currency-selector")
+    compose.onNodeWithTag("report-currency:EUR").assertIsSelected()
+    compose.runOnIdle { currencies = currencies.filterNot { it.id == "EUR" } }
+    compose.onNodeWithTag("report-currency:USD").assertIsSelected()
+    scroll("TOTAL EARNED")
+    compose.onNodeWithText("TOTAL EARNED").assertIsDisplayed()
+  }
 
   @Test fun monthNavigationModesChartAndCategoryExpansion() {
     launch()

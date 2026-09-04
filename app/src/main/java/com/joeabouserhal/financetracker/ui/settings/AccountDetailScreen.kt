@@ -1,23 +1,19 @@
 package com.joeabouserhal.financetracker.ui.settings
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -27,8 +23,12 @@ import com.joeabouserhal.financetracker.data.session.Session
 import com.joeabouserhal.financetracker.theme.LocalThemeSpec
 import com.joeabouserhal.financetracker.ui.rememberAppContainer
 import com.joeabouserhal.financetracker.ui.transactions.TransactionRow
+import com.joeabouserhal.financetracker.ui.transactions.TransactionDashedDivider
+import com.joeabouserhal.financetracker.ui.components.ManagementPage
+import com.joeabouserhal.financetracker.ui.components.ManagementSection
+import com.joeabouserhal.financetracker.ui.components.ManagementEmptyState
+import com.joeabouserhal.financetracker.ui.components.compactCurrencyText
 import com.joeabouserhal.financetracker.utils.Dates
-import com.joeabouserhal.financetracker.utils.Money
 import java.time.YearMonth
 import kotlinx.coroutines.flow.combine
 
@@ -73,57 +73,51 @@ fun AccountDetailScreen(
       }
   }.collectAsStateWithLifecycle(initialValue = AccountDetailState("", "", "", 0, 0, 0, emptyList()))
 
-  Column(modifier.fillMaxSize().background(spec.background)) {
-    Row(
-      Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
-      verticalAlignment = Alignment.CenterVertically,
-    ) {
-      Text("< BACK", style = MaterialTheme.typography.labelMedium, color = spec.accent, modifier = Modifier.padding(4.dp).minimumInteractiveComponentSize().clickable(onClick = onBack))
-    }
-    Column(Modifier.padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-      Text(state.accountName.uppercase(), style = MaterialTheme.typography.headlineLarge, color = spec.ink)
-      Text("${state.currencyCode} ACCOUNT", style = MaterialTheme.typography.labelMedium, color = spec.muted)
-    }
+  AccountDetailContent(state, onBack, onEditTransaction, modifier)
+}
 
-    DividerLine()
-
-    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-      Text("BALANCE", style = MaterialTheme.typography.labelMedium, color = spec.muted)
-      Text(
-        Money.format(state.balanceMinor, state.currencySymbol, forceDecimals = true),
-        style = MaterialTheme.typography.displaySmall,
-        color = if (state.balanceMinor < 0) spec.expense else spec.ink,
-      )
-      Text("THIS MONTH", style = MaterialTheme.typography.labelMedium, color = spec.muted)
-      Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-        Text("+${Money.format(state.monthIncome, state.currencySymbol)}", style = MaterialTheme.typography.labelLarge, color = spec.income)
-        Text("-${Money.format(state.monthExpense, state.currencySymbol)}", style = MaterialTheme.typography.labelLarge, color = spec.expense)
+@Composable
+internal fun AccountDetailContent(
+  state: AccountDetailState,
+  onBack: () -> Unit,
+  onEditTransaction: (String) -> Unit,
+  modifier: Modifier = Modifier,
+) {
+  val spec = LocalThemeSpec.current
+  ManagementPage(state.accountName.ifBlank { "Account" }, "${state.currencyCode} · Account overview", onBack, modifier, listTag = "account-detail-list") {
+    item("balance") {
+      Column(Modifier.fillMaxWidth().background(spec.surface).border(1.dp, spec.border).padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Text("CURRENT BALANCE", style = MaterialTheme.typography.labelSmall, color = spec.muted)
+        Text(compactCurrencyText(state.balanceMinor, state.currencySymbol), style = MaterialTheme.typography.headlineMedium,
+          color = if (state.balanceMinor < 0) spec.expense else spec.ink)
+        TransactionDashedDivider()
+        Text("THIS MONTH", style = MaterialTheme.typography.labelSmall, color = spec.muted)
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+          Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text("EARNED", style = MaterialTheme.typography.labelSmall, color = spec.muted)
+            Text(compactCurrencyText(state.monthIncome, state.currencySymbol, "+ "), style = MaterialTheme.typography.titleMedium, color = spec.income)
+          }
+          Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text("SPENT", style = MaterialTheme.typography.labelSmall, color = spec.muted)
+            Text(compactCurrencyText(state.monthExpense, state.currencySymbol, "− "), style = MaterialTheme.typography.titleMedium, color = spec.expense)
+          }
+        }
       }
     }
-
-    DividerLine()
-
-    Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
-      Text("TRANSACTIONS", style = MaterialTheme.typography.labelMedium, color = spec.muted)
+    item("transactions-heading") { ManagementSection("Transactions", state.items.size) }
+    if (state.items.isEmpty()) item("empty") {
+      ManagementEmptyState("No activity yet", "Transactions recorded against this account will appear here.")
     }
-    if (state.items.isEmpty()) {
-      Text(
-        "No transactions on this account yet.",
-        style = MaterialTheme.typography.labelSmall,
-        color = spec.muted,
-        modifier = Modifier.padding(horizontal = 16.dp),
-      )
-    } else {
-      LazyColumn(Modifier.weight(1f)) {
-        items(state.items, key = { it.transaction.id }) { item ->
-          TransactionRow(item = item, onPress = { onEditTransaction(item.transaction.id) })
-        }
+    itemsIndexed(state.items.sortedByDescending { it.transaction.date }, key = { _, item -> item.transaction.id }) { index, item ->
+      Column(Modifier.fillMaxWidth().background(spec.surface)) {
+        if (index > 0) TransactionDashedDivider(Modifier.padding(horizontal = 12.dp))
+        TransactionRow(item, { onEditTransaction(item.transaction.id) })
       }
     }
   }
 }
 
-private data class AccountDetailState(
+internal data class AccountDetailState(
   val accountName: String,
   val currencyCode: String,
   val currencySymbol: String,
@@ -132,14 +126,3 @@ private data class AccountDetailState(
   val monthExpense: Long,
   val items: List<com.joeabouserhal.financetracker.data.repositories.TransactionListItem>,
 )
-
-@Composable
-private fun DividerLine() {
-  val spec = LocalThemeSpec.current
-  androidx.compose.foundation.layout.Box(
-    Modifier
-      .fillMaxWidth()
-      .height(1.dp)
-      .background(spec.border.copy(alpha = 0.45f)),
-  )
-}

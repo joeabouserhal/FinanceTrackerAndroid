@@ -1,31 +1,10 @@
 package com.joeabouserhal.financetracker.ui.categories
 
-import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.core.tween
-import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectDragGestures
-import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.RowScope
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.aspectRatio
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.material3.minimumInteractiveComponentSize
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Slider
-import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -34,13 +13,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.toArgb
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.joeabouserhal.financetracker.data.local.entities.CategoryEntity
@@ -48,16 +22,11 @@ import com.joeabouserhal.financetracker.data.local.entities.TransactionType
 import com.joeabouserhal.financetracker.data.session.Session
 import com.joeabouserhal.financetracker.theme.LocalThemeSpec
 import com.joeabouserhal.financetracker.ui.components.BrButton
-import com.joeabouserhal.financetracker.ui.components.BrChip
 import com.joeabouserhal.financetracker.ui.components.BrDialog
 import com.joeabouserhal.financetracker.ui.components.BrSegmentedToggle
 import com.joeabouserhal.financetracker.ui.components.BrTextField
-import com.joeabouserhal.financetracker.ui.components.ScreenHeader
 import com.joeabouserhal.financetracker.ui.rememberAppContainer
 import com.joeabouserhal.financetracker.utils.parseHexColor
-import kotlin.math.PI
-import kotlin.math.atan2
-import kotlin.math.sqrt
 import kotlinx.coroutines.launch
 
 /**
@@ -96,7 +65,7 @@ fun CategoriesScreen(
   val ownerId = session.ownerId
 
   // "ALL" | "EXPENSE" | "INCOME" — ALL is the default.
-  var filterName by rememberSaveable { mutableStateOf("ALL") }
+  var filterName by rememberSaveable(ownerId) { mutableStateOf("ALL") }
   val filterType: TransactionType? =
     when (filterName) {
       "EXPENSE" -> TransactionType.EXPENSE
@@ -107,78 +76,24 @@ fun CategoriesScreen(
   val allCategories by remember(ownerId) { container.categoryRepository.observeAll(ownerId) }
     .collectAsStateWithLifecycle(initialValue = emptyList())
 
-  var search by rememberSaveable { mutableStateOf("") }
+  var search by rememberSaveable(ownerId) { mutableStateOf("") }
   var editing by remember { mutableStateOf<CategoryEntity?>(null) }
   var adding by remember { mutableStateOf(false) }
   var deleting by remember { mutableStateOf<CategoryEntity?>(null) }
   var error by remember { mutableStateOf<String?>(null) }
 
-  val visibleCategories =
-    allCategories
-      .filter { filterType == null || it.type == filterType }
-      .filter { it.name.contains(search.trim(), ignoreCase = true) }
-      .filter { !(it.isDefault && it.name == "Other") } // seeded fallback is invisible
-
-  Column(modifier.fillMaxSize().background(spec.background)) {
-    if (onBack != null) {
-      Row(
-        Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-      ) {
-        Text("< BACK", style = MaterialTheme.typography.labelMedium, color = spec.accent, modifier = Modifier.padding(4.dp).minimumInteractiveComponentSize().clickable(onClick = onBack))
-      }
-    }
-    ScreenHeader(title = "Categories", subtitle = "EVERY TRANSACTION NEEDS ONE — 'OTHER' IS THE FALLBACK")
-
-    Column(
-      Modifier
-        .fillMaxSize()
-        .verticalScroll(rememberScrollState())
-        .padding(horizontal = 16.dp),
-      verticalArrangement = Arrangement.spacedBy(6.dp),
-    ) {
-      BrButton(text = "+ Add category", onClick = { adding = true })
-
-      BrTextField(
-        value = search,
-        onValueChange = { search = it },
-        label = "SEARCH CATEGORIES",
-        modifier = Modifier.fillMaxWidth(),
-      )
-
-      Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-        BrChip("All", selected = filterName == "ALL", onClick = { filterName = "ALL" })
-        BrChip("Expense", selected = filterName == "EXPENSE", onClick = { filterName = "EXPENSE" }, colorDot = spec.expense)
-        BrChip("Income", selected = filterName == "INCOME", onClick = { filterName = "INCOME" }, colorDot = spec.income)
-      }
-
-      error?.let { Text(it, style = MaterialTheme.typography.labelMedium, color = spec.expense) }
-
-      if (visibleCategories.isEmpty()) {
-        Text(
-          if (allCategories.isEmpty()) "No categories yet — add one above." else "No categories match your search.",
-          style = MaterialTheme.typography.bodySmall,
-          color = spec.muted,
-        )
-      }
-
-      visibleCategories.forEach { category ->
-        CategoryRow(
-          category = category,
-          onEdit = { editing = category },
-          onDelete = { deleting = category },
-        )
-      }
-
-      Spacer(Modifier.height(32.dp))
-    }
-  }
+  CategoryLibrary(
+    allCategories, search, { search = it }, filterName, { filterName = it }, onBack,
+    onAdd = { error = null; adding = true }, onEdit = { error = null; editing = it },
+    modifier = modifier, error = error,
+  )
 
   if (adding) {
     CategoryDialog(
       title = "ADD CATEGORY",
       initial = null,
       defaultType = filterType ?: TransactionType.EXPENSE,
+      saveError = error,
       onDismiss = { adding = false },
       onSave = { name, color, chosenType ->
         scope.launch {
@@ -197,6 +112,8 @@ fun CategoriesScreen(
       title = "EDIT CATEGORY",
       initial = category,
       defaultType = category.type,
+      saveError = error,
+      onDelete = { editing = null; error = null; deleting = category },
       onDismiss = { editing = null },
       onSave = { name, color, chosenType ->
         scope.launch {
@@ -226,45 +143,21 @@ fun CategoriesScreen(
       },
     ) {
       Text("Its transactions move to 'Other'.", style = MaterialTheme.typography.bodyMedium)
+      error?.let { Text(it, color = spec.expense, style = MaterialTheme.typography.bodySmall) }
     }
   }
 }
 
-@Composable
-private fun CategoryRow(category: CategoryEntity, onEdit: () -> Unit, onDelete: () -> Unit) {
-  val spec = LocalThemeSpec.current
-  val dotColor by animateColorAsState(
-    targetValue = parseColor(category.color),
-    animationSpec = tween(200),
-    label = "categoryDot",
-  )
-  Row(
-    Modifier.fillMaxWidth().background(spec.surface).padding(horizontal = 12.dp, vertical = 4.dp),
-    verticalAlignment = Alignment.CenterVertically,
-  ) {
-    Box(Modifier.size(14.dp).background(dotColor).border(1.dp, spec.border))
-    Text(
-      category.name,
-      style = MaterialTheme.typography.bodyMedium,
-      color = spec.ink,
-      modifier = Modifier.weight(1f).padding(horizontal = 12.dp),
-    )
-    if (category.isDefault && category.name == "Other") {
-      Text("SEEDED", style = MaterialTheme.typography.labelSmall, color = spec.muted)
-    } else {
-      Text("EDIT", style = MaterialTheme.typography.labelSmall, color = spec.accent, modifier = Modifier.padding(4.dp).minimumInteractiveComponentSize().clickable(onClick = onEdit))
-      Text("DEL", style = MaterialTheme.typography.labelSmall, color = spec.expense, modifier = Modifier.padding(4.dp).minimumInteractiveComponentSize().clickable(onClick = onDelete))
-    }
-  }
-}
 
 @Composable
-private fun CategoryDialog(
+internal fun CategoryDialog(
   title: String,
   initial: CategoryEntity?,
   defaultType: TransactionType,
   onDismiss: () -> Unit,
   onSave: (name: String, color: String, type: TransactionType) -> Unit,
+  saveError: String? = null,
+  onDelete: (() -> Unit)? = null,
 ) {
   val spec = LocalThemeSpec.current
   var name by remember { mutableStateOf(initial?.name ?: "") }
@@ -276,7 +169,9 @@ private fun CategoryDialog(
   BrDialog(
     title = title,
     onDismiss = onDismiss,
+    scrollContent = true,
     onConfirm = {
+      dialogError = null
       if (name.isBlank()) {
         dialogError = "Category name is required"
       } else {
@@ -292,7 +187,7 @@ private fun CategoryDialog(
         optionColors = listOf(spec.expense, spec.income),
       )
       BrTextField(name, { name = it }, "NAME")
-      dialogError?.let {
+      (dialogError ?: saveError)?.let {
         Text(it, style = MaterialTheme.typography.labelSmall, color = spec.expense)
       }
       Text("COLOR", style = MaterialTheme.typography.labelSmall, color = spec.muted)
@@ -309,6 +204,9 @@ private fun CategoryDialog(
             }
           }
         }
+      }
+      if (onDelete != null) {
+        BrButton("Delete category", onDelete, style = com.joeabouserhal.financetracker.ui.components.BrButtonStyle.DANGER, compact = true)
       }
     }
   }

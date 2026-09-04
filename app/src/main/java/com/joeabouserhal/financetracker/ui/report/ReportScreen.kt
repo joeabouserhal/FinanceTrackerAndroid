@@ -1,11 +1,12 @@
 package com.joeabouserhal.financetracker.ui.report
 
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.MaterialTheme
@@ -15,15 +16,14 @@ import androidx.compose.runtime.saveable.listSaver
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -90,7 +90,7 @@ fun ReportScreen(modifier: Modifier = Modifier) {
   ReportContent(ownerId = owner, items = current.first, currencies = current.second, today = today,
     activeAccountCurrencies = current.third.associate { it.id to it.currencyId }, modifier = modifier,
     refinementPanel = { filters, update, type ->
-      FilterPanel(filters, update, typeHint = type, showTypeRow = false, showDateRow = false, showSortRow = false)
+      FilterPanel(filters, update, typeHint = type, showTypeRow = false, showDateRow = false, showSortRow = false, showCurrencyRow = false)
     })
 }
 
@@ -115,6 +115,7 @@ internal fun ReportContent(
   var expanded by rememberSaveable { mutableStateOf(emptyList<String>()) }
   var detailCurrency by rememberSaveable { mutableStateOf<String?>(null) }
   var detailCategory by rememberSaveable { mutableStateOf<String?>(null) }
+  var currencyChoice by rememberSaveable { mutableStateOf<String?>(null) }
   if (savedOwner != ownerId) {
     savedOwner = ownerId
     period = ReportPeriod(month = YearMonth.from(today))
@@ -125,22 +126,27 @@ internal fun ReportContent(
     expanded = emptyList()
     detailCurrency = null
     detailCategory = null
+    currencyChoice = null
   }
-  LaunchedEffect(currencies, activeAccountCurrencies) {
-    val currencyIds = filters.currencyIds.intersect(currencies.map { it.id }.toSet())
-    val accounts = activeAccountCurrencies.filterValues { currencyIds.isEmpty() || it in currencyIds }.keys
-    filters = filters.copy(currencyIds = currencyIds, accountIds = filters.accountIds.intersect(accounts))
+  val currencyOptions = currencies.sortedByDescending { it.isDefault }
+  val selectedCurrency = currencyOptions.firstOrNull { it.id == currencyChoice } ?: currencyOptions.firstOrNull()
+  val allowedAccounts = activeAccountCurrencies.filterValues { it == selectedCurrency?.id }.keys
+  val reportFilters = filters.copy(currencyIds = selectedCurrency?.let { setOf(it.id) }.orEmpty(),
+    accountIds = filters.accountIds.intersect(allowedAccounts))
+  LaunchedEffect(selectedCurrency?.id, activeAccountCurrencies) {
+    currencyChoice = selectedCurrency?.id
+    filters = filters.copy(currencyIds = emptySet(), accountIds = filters.accountIds.intersect(allowedAccounts))
   }
-  val reports = remember(items, currencies, filters, period, viewType, today) {
-    buildReports(items, currencies, viewType, period, filters, today)
+  val reports = remember(items, currencies, reportFilters, period, viewType, today) {
+    buildReports(items, currencies, viewType, period, reportFilters, today)
   }
-  val activeCount = reportRefinementCount(filters)
+  val activeCount = reportRefinementCount(reportFilters.copy(currencyIds = emptySet()))
   val listState = key(ownerId) { rememberLazyListState() }
   val tone = if (viewType == TransactionType.EXPENSE) spec.expense else spec.income
   LazyColumn(state = listState, modifier = modifier.fillMaxSize().background(spec.background).testTag("report-list"),
-    contentPadding = PaddingValues(bottom = 28.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    contentPadding = PaddingValues(bottom = 28.dp)) {
     item("header") { ScreenHeader(title = "Report") }
-    item("period") {
+    reportSection("period") {
       Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
         if (period.kind == ReportPeriodKind.MONTH) {
           PeriodArrow("Previous month", "‹") { period = period.copy(month = period.month.minusMonths(1)); expanded = emptyList() }
@@ -155,7 +161,7 @@ internal fun ReportContent(
         }
       }
     }
-    item("controls") {
+    reportSection("controls") {
       ReportControls(
         viewType = viewType, filtersOpen = filtersOpen, activeCount = activeCount,
         onToggleFilters = { filtersOpen = !filtersOpen },
@@ -164,23 +170,41 @@ internal fun ReportContent(
         },
       )
     }
-    if (filtersOpen) item("filters") {
-      refinementPanel(filters, { filters = it; expanded = emptyList() }, if (viewType == TransactionType.EXPENSE) TypeFilter.EXPENSE else TypeFilter.INCOME)
-    }
-    if (reports.isEmpty()) item("empty") {
-      EmptyState(if (items.isEmpty()) "No transactions yet — add some to see a report."
-        else "No ${if (viewType == TransactionType.EXPENSE) "spending" else "earning"} in this range${if (activeCount > 0) " with these filters" else ""}.", Modifier.padding(16.dp))
-    }
-    reports.forEachIndexed { index, report ->
-      if (index > 0) item("divider:${report.currencyId}") { ReportDivider(Modifier.padding(horizontal = 16.dp, vertical = 6.dp)) }
-      item("summary:${report.currencyId}") { ReportHeadline(report, viewType, period, today) }
-      item("chart:${report.currencyId}") { key(period, viewType, filters) { TrendChart(report, tone, Modifier.padding(horizontal = 16.dp)) } }
-      item("categories:${report.currencyId}") { Text("BY CATEGORY", style = MaterialTheme.typography.labelSmall, color = spec.muted, modifier = Modifier.padding(start = 16.dp, top = 4.dp)) }
-      val shown = if (report.currencyId in expanded) report.categories else report.categories.take(5)
-      items(shown, key = { "category:${report.currencyId}:${it.id}" }) { category ->
-        CategoryReportRow(category, report.symbol, Modifier.padding(horizontal = 16.dp)) { detailCurrency = report.currencyId; detailCategory = category.id }
+    if (currencyOptions.isNotEmpty()) reportSection("currency-selector") {
+      Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp)
+        .testTag("report-currency-selector"), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+        currencyOptions.forEach { currency ->
+          BrChip(currency.code, selectedCurrency?.id == currency.id, {
+            if (currencyChoice != currency.id) {
+              currencyChoice = currency.id
+              filters = filters.copy(accountIds = emptySet(), currencyIds = emptySet())
+              detailCategory = null
+              detailCurrency = null
+            }
+          }, modifier = Modifier.testTag("report-currency:${currency.id}").semantics { selected = selectedCurrency?.id == currency.id }, comfortable = true)
+        }
       }
-      if (report.categories.size > 5) item("expand:${report.currencyId}") {
+    }
+    if (filtersOpen) reportSection("filters") {
+      refinementPanel(reportFilters, { filters = it.copy(currencyIds = emptySet()); expanded = emptyList() }, if (viewType == TransactionType.EXPENSE) TypeFilter.EXPENSE else TypeFilter.INCOME)
+    }
+    if (reports.isEmpty()) reportSection("empty") {
+      EmptyState(if (items.isEmpty()) "No transactions yet — add some to see a report."
+        else "No ${if (viewType == TransactionType.EXPENSE) "spending" else "earning"}${selectedCurrency?.let { " in ${it.code}" }.orEmpty()} in this range${if (activeCount > 0) " with these filters" else ""}.", Modifier.padding(16.dp))
+    }
+    reports.forEach { report ->
+      reportSection("summary:${report.currencyId}") { ReportHeadline(report, viewType, period, today) }
+      reportSection("chart:${report.currencyId}") { key(period, viewType, filters) { TrendChart(report, tone, Modifier.padding(horizontal = 16.dp)) } }
+      reportSection("categories:${report.currencyId}") { Text("BY CATEGORY", style = MaterialTheme.typography.labelSmall, color = spec.muted, modifier = Modifier.padding(start = 16.dp, top = 4.dp, bottom = 12.dp)) }
+      val shown = if (report.currencyId in expanded) report.categories else report.categories.take(5)
+      itemsIndexed(shown, key = { _, category -> "category:${report.currencyId}:${category.id}" }) { categoryIndex, category ->
+        Column(Modifier.padding(horizontal = 16.dp).fillMaxWidth().background(spec.surface)
+          .testTag("report-category:${report.currencyId}:${category.id}")) {
+          if (categoryIndex > 0) TransactionDashedDivider(Modifier.testTag("report-category-divider:${report.currencyId}:${category.id}"))
+          CategoryReportRow(category, report.symbol, Modifier) { detailCurrency = report.currencyId; detailCategory = category.id }
+        }
+      }
+      if (report.categories.size > 5) reportSection("expand:${report.currencyId}") {
         Text(if (report.currencyId in expanded) "Show less" else "Show all categories (${report.categories.size})", style = MaterialTheme.typography.labelMedium, color = spec.accent,
           modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp).clickable(role = Role.Button) {
             expanded = if (report.currencyId in expanded) expanded - report.currencyId else expanded + report.currencyId
@@ -193,6 +217,16 @@ internal fun ReportContent(
     val report = reports.firstOrNull { it.currencyId == detailCurrency }
     val category = report?.categories?.firstOrNull { it.id == detailCategory }
     CategoryDetailsDialog(category, report?.symbol.orEmpty(), period.label(today), onDismiss = { detailCategory = null; detailCurrency = null })
+  }
+}
+
+/** Space report sections, but keep individual category rows contiguous and lazy. */
+private fun LazyListScope.reportSection(key: String, content: @Composable () -> Unit) {
+  item(key) {
+    Column {
+      Spacer(Modifier.height(12.dp))
+      content()
+    }
   }
 }
 
@@ -312,13 +346,5 @@ internal fun CategoryDetailsDialog(category: CategoryReport?, symbol: String, pe
         Column { if (index > 0) TransactionDashedDivider(); TransactionRow(transaction, onPress = null) }
       }
     }
-  }
-}
-
-@Composable
-private fun ReportDivider(modifier: Modifier = Modifier) {
-  val color = LocalThemeSpec.current.border.copy(alpha = 0.65f)
-  Canvas(modifier.fillMaxWidth().height(1.dp)) {
-    drawLine(color, Offset(0f, size.height / 2), Offset(size.width, size.height / 2), strokeWidth = 1.dp.toPx(), pathEffect = PathEffect.dashPathEffect(floatArrayOf(4.dp.toPx(), 4.dp.toPx())))
   }
 }
