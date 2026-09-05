@@ -14,7 +14,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
@@ -87,21 +86,7 @@ fun AuthScreen(
     verticalArrangement = Arrangement.spacedBy(18.dp),
   ) {
     Spacer(Modifier.height(6.dp))
-    Row(
-      verticalAlignment = Alignment.CenterVertically,
-      horizontalArrangement = Arrangement.spacedBy(9.dp),
-    ) {
-      Box(Modifier.size(11.dp).background(spec.accent))
-      Text("PRIVATE LEDGER / V1", style = MaterialTheme.typography.labelSmall, color = spec.muted)
-    }
     Text("FINANCE\nTRACKER", style = MaterialTheme.typography.displayMedium, color = spec.ink)
-    Text(
-      "YOUR MONEY, STORED LOCALLY.\nSYNCED ONLY WHEN YOU'RE ONLINE.",
-      style = MaterialTheme.typography.labelMedium,
-      color = spec.muted,
-    )
-
-    Box(Modifier.width(34.dp).height(3.dp).background(spec.accent))
 
     Column(
       Modifier.fillMaxWidth().background(spec.surface),
