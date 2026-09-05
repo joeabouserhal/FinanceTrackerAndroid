@@ -33,6 +33,7 @@ internal fun GoalEditorDialog(
   val options = accounts.filter { it.currencyId == currencyId && (!it.archived || it.id == initial?.accountId) }
   BrDialog(if (initial == null) "NEW GOAL" else "EDIT GOAL", onDismiss,
     confirmText = if (busy) "SAVING…" else "SAVE GOAL", confirmEnabled = !busy, scrollContent = true,
+    settleBeforeEnter = true,
     onConfirm = {
       val target = textToMinor(amount)
       validation = when {

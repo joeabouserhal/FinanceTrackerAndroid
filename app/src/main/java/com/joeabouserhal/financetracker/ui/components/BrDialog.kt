@@ -5,6 +5,9 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -19,8 +22,12 @@ import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
@@ -46,10 +53,24 @@ fun BrDialog(
   wide: Boolean = false,
   /** Forms can scroll while their title and Save/Cancel actions remain visible. */
   scrollContent: Boolean = false,
+  /** Lets a content-heavy form finish its first layout before becoming visible. */
+  settleBeforeEnter: Boolean = false,
   content: @Composable () -> Unit,
 ) {
   val spec = LocalThemeSpec.current
   val destructive = confirmText.contains("DELETE", ignoreCase = true) || confirmText.contains("REMOVE", ignoreCase = true)
+  val enterProgress = remember { Animatable(if (settleBeforeEnter) 0f else 1f) }
+
+  LaunchedEffect(settleBeforeEnter) {
+    if (settleBeforeEnter) {
+      enterProgress.snapTo(0f)
+      withFrameNanos { }
+      withFrameNanos { }
+      enterProgress.animateTo(1f, tween(durationMillis = 180, easing = FastOutSlowInEasing))
+    } else {
+      enterProgress.snapTo(1f)
+    }
+  }
 
   Dialog(
     onDismissRequest = onDismiss,
@@ -72,7 +93,12 @@ fun BrDialog(
           Modifier
             .fillMaxWidth()
             .background(spec.surface)
-            .border(spec.borderWidth, spec.border),
+            .border(spec.borderWidth, spec.border)
+            .graphicsLayer {
+              alpha = enterProgress.value
+              scaleX = 0.97f + (enterProgress.value * 0.03f)
+              scaleY = 0.97f + (enterProgress.value * 0.03f)
+            },
         ) {
           Row(
             Modifier.fillMaxWidth().background(spec.surfaceAlt).padding(start = 16.dp, end = 10.dp, top = 10.dp, bottom = 10.dp),

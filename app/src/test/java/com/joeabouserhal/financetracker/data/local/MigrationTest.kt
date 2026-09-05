@@ -274,6 +274,8 @@ class MigrationTest {
       // v9 upgrades have an op_id SQL default, while fresh v10 installs do not.
       val room = Room.databaseBuilder(context, AppDatabase::class.java, name)
         .addMigrations(Migrations.MIGRATION_10_11)
+        .addMigrations(Migrations.MIGRATION_11_12)
+        .addMigrations(Migrations.MIGRATION_12_13)
         .allowMainThreadQueries()
         .build()
       try {
@@ -281,7 +283,11 @@ class MigrationTest {
           assertTrue(it.moveToFirst())
           assertEquals("Guest", it.getString(0))
         }
-        assertEquals(11, room.openHelper.writableDatabase.version)
+        assertEquals(13, room.openHelper.writableDatabase.version)
+        room.openHelper.writableDatabase.query("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='assistant_commands'").use {
+          assertTrue(it.moveToFirst())
+          assertEquals(0, it.getInt(0))
+        }
       } finally {
         room.close()
       }

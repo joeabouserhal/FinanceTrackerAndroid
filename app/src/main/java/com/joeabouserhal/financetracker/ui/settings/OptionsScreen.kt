@@ -67,6 +67,7 @@ fun OptionsScreen(
     .collectAsStateWithLifecycle(initialValue = null)
 
   var nameDraft by remember { mutableStateOf("") }
+  var isEditingName by remember(session.ownerId) { mutableStateOf(false) }
   var error by remember { mutableStateOf<String?>(null) }
   var isSavingName by remember { mutableStateOf(false) }
   var showSignOutConfirm by remember { mutableStateOf(false) }
@@ -81,14 +82,6 @@ fun OptionsScreen(
   val trimmedName = nameDraft.trim()
   val savedName = profile?.name?.trim().orEmpty()
   val nameChanged = trimmedName.isNotBlank() && trimmedName != savedName
-  val saveLabel =
-    when {
-      isSavingName -> "SAVING..."
-      trimmedName.isBlank() -> "ENTER A NAME"
-      nameChanged -> "SAVE NAME"
-      else -> "NAME SAVED"
-    }
-
   Column(modifier.fillMaxSize().background(spec.background)) {
     ScreenHeader(title = "Settings", subtitle = "PROFILE, DATA, AND SYNC")
 
@@ -114,7 +107,17 @@ fun OptionsScreen(
           },
           isGuest = session.isGuest,
           createdAt = profile?.createdAt,
-          saveLabel = saveLabel,
+          isEditingName = isEditingName,
+          onStartEditing = {
+            nameDraft = savedName
+            isEditingName = true
+            error = null
+          },
+          onCancelEditing = {
+            nameDraft = savedName
+            isEditingName = false
+            error = null
+          },
           canSave = nameChanged && !isSavingName,
           onSave = {
             scope.launch {
@@ -122,6 +125,7 @@ fun OptionsScreen(
               try {
                 container.profileRepository.setName(session.ownerId, trimmedName)
                 error = null
+                isEditingName = false
               } catch (e: Exception) {
                 error = e.message ?: "The profile name could not be saved."
               } finally {
@@ -240,7 +244,9 @@ private fun ProfilePanel(
   onNameChange: (String) -> Unit,
   isGuest: Boolean,
   createdAt: String?,
-  saveLabel: String,
+  isEditingName: Boolean,
+  onStartEditing: () -> Unit,
+  onCancelEditing: () -> Unit,
   canSave: Boolean,
   onSave: () -> Unit,
 ) {
@@ -295,19 +301,38 @@ private fun ProfilePanel(
       )
     }
 
-    BrTextField(
-      value = name,
-      onValueChange = onNameChange,
-      label = "DISPLAY NAME",
-      modifier = Modifier.fillMaxWidth(),
-    )
-    BrButton(
-      text = saveLabel,
-      onClick = onSave,
-      enabled = canSave,
-      compact = true,
-      modifier = Modifier.fillMaxWidth(),
-    )
+    if (isEditingName) {
+      BrTextField(
+        value = name,
+        onValueChange = onNameChange,
+        label = "DISPLAY NAME",
+        modifier = Modifier.fillMaxWidth(),
+      )
+      Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        BrButton(
+          text = "CANCEL",
+          onClick = onCancelEditing,
+          style = BrButtonStyle.OUTLINE,
+          compact = true,
+          modifier = Modifier.weight(1f),
+        )
+        BrButton(
+          text = "SAVE",
+          onClick = onSave,
+          enabled = canSave,
+          compact = true,
+          modifier = Modifier.weight(1f),
+        )
+      }
+    } else {
+      BrButton(
+        text = "EDIT NAME",
+        onClick = onStartEditing,
+        style = BrButtonStyle.OUTLINE,
+        compact = true,
+        modifier = Modifier.fillMaxWidth(),
+      )
+    }
   }
 }
 

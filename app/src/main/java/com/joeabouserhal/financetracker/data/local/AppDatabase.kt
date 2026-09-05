@@ -37,7 +37,7 @@ import com.joeabouserhal.financetracker.data.local.entities.TransactionEntity
       SyncMetaEntity::class,
       com.joeabouserhal.financetracker.data.local.entities.SyncHealthEntity::class,
     ],
-  version = 11,
+  version = 13,
   exportSchema = true,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -186,6 +186,36 @@ object Migrations {
     override fun migrate(db: SupportSQLiteDatabase) = SyncRecoveryMigration.migrate(db)
   }
 
+  // Version 12 briefly held local assistant confirmations. Keep this bridge so
+  // installed preview builds can upgrade safely, then remove the unused data.
+  val MIGRATION_11_12 = object : Migration(11, 12) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+      db.execSQL(
+        """
+        CREATE TABLE IF NOT EXISTS `assistant_commands` (
+          `id` TEXT NOT NULL,
+          `owner_id` TEXT NOT NULL,
+          `action` TEXT NOT NULL,
+          `payload_json` TEXT NOT NULL,
+          `created_at` INTEGER NOT NULL,
+          `expires_at` INTEGER NOT NULL,
+          `consumed_at` INTEGER,
+          PRIMARY KEY(`id`)
+        )
+        """.trimIndent(),
+      )
+      db.execSQL("CREATE INDEX IF NOT EXISTS `index_assistant_commands_owner_id` ON `assistant_commands` (`owner_id`)")
+      db.execSQL("CREATE INDEX IF NOT EXISTS `index_assistant_commands_expires_at` ON `assistant_commands` (`expires_at`)")
+    }
+  }
+
+  /** Removes temporary assistant storage without affecting finance records. */
+  val MIGRATION_12_13 = object : Migration(12, 13) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+      db.execSQL("DROP TABLE IF EXISTS `assistant_commands`")
+    }
+  }
+
   val ALL: Array<Migration> =
-    arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11)
+    arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13)
 }
