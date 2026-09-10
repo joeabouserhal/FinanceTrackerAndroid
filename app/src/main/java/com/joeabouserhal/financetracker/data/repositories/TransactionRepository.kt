@@ -39,6 +39,7 @@ class TransactionRepository(
     notes: String?,
     presetId: String?,
     goalId: String? = null,
+    recurrenceOccurrenceId: String? = null,
   ): TransactionEntity {
     require(amount > 0) { "Amount must be positive" }
     require(currencyId.isNotBlank()) { "Currency is required" }
@@ -60,6 +61,7 @@ class TransactionRepository(
         notes = notes?.takeIf { it.isNotBlank() },
         presetId = presetId?.takeIf { it.isNotBlank() },
         goalId = goalId?.takeIf { it.isNotBlank() },
+        recurrenceOccurrenceId = recurrenceOccurrenceId?.takeIf { it.isNotBlank() },
         createdAt = now,
         updatedAt = now,
       )

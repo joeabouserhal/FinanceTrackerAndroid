@@ -46,6 +46,8 @@ object SyncRecoveryMigration {
     // elevate old snapshots to a new edit. Newer server winners and tombstones
     // remain authoritative. Preserve every existing op and every guest row.
     for (spec in SyncTables.ALL) {
+      val exists = db.query("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", arrayOf(spec.name)).use { it.moveToFirst() }
+      if (!exists) continue
       db.query("SELECT * FROM `${spec.name}` WHERE owner_id<>?", arrayOf(GUEST_OWNER_ID)).use { cursor ->
         while (cursor.moveToNext()) {
           val owner = cursor.getString(cursor.getColumnIndexOrThrow("owner_id"))

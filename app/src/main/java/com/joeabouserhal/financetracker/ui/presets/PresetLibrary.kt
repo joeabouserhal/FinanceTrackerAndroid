@@ -20,6 +20,7 @@ internal fun PresetLibrary(
   currencies: List<CurrencyEntity>,
   accounts: List<AccountEntity>,
   categories: List<CategoryEntity>,
+  schedules: Map<String, RecurringScheduleEntity> = emptyMap(),
   filter: PresetFilter,
   onFilter: (PresetFilter) -> Unit,
   onBack: () -> Unit,
@@ -57,7 +58,7 @@ internal fun PresetLibrary(
       if (group.isNotEmpty()) {
         item("group:$type") { ManagementSection(if (type == TransactionType.EXPENSE) "Expense presets" else "Income presets", group.size, compact = true) }
         itemsIndexed(group, key = { _, preset -> "preset:${preset.id}" }) { index, preset ->
-          PresetRowView(preset, currencies, accounts, categories, onTap = { onSelect(preset) }, divider = index > 0)
+          PresetRowView(preset, currencies, accounts, categories, schedule = schedules[preset.id], onTap = { onSelect(preset) }, divider = index > 0)
         }
       }
     }

@@ -39,6 +39,7 @@ internal fun ReportPeriodDialog(period: ReportPeriod, today: LocalDate, onDismis
   val selectedMonth = YearMonth.of(year, month)
   val valid = when (kind) {
     ReportPeriodKind.MONTH -> selectedMonth <= YearMonth.from(today)
+    ReportPeriodKind.YEAR -> year <= today.year
     ReportPeriodKind.CUSTOM -> rangeState.selectedStartDateMillis != null && rangeState.selectedEndDateMillis != null
     ReportPeriodKind.ALL -> true
   }
@@ -50,26 +51,35 @@ internal fun ReportPeriodDialog(period: ReportPeriod, today: LocalDate, onDismis
     onSelect(ReportPeriod(kind, selectedMonth, custom))
   }) {
     Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-      listOf(ReportPeriodKind.MONTH to "MONTH", ReportPeriodKind.CUSTOM to "CUSTOM", ReportPeriodKind.ALL to "ALL TIME").forEach { (mode, label) ->
+      listOf(
+        ReportPeriodKind.MONTH to "MONTH",
+        ReportPeriodKind.YEAR to "YEAR",
+        ReportPeriodKind.CUSTOM to "CUSTOM",
+        ReportPeriodKind.ALL to "ALL TIME",
+      ).forEach { (mode, label) ->
         BrChip(label, selected = kind == mode, onClick = { kind = mode }, comfortable = true)
       }
     }
     when (kind) {
-      ReportPeriodKind.MONTH -> {
+      ReportPeriodKind.MONTH, ReportPeriodKind.YEAR -> {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
           YearArrow("Previous year", "‹", year > 1) { year-- }
           Text(year.toString(), style = MaterialTheme.typography.titleMedium, color = spec.ink, modifier = Modifier.weight(1f), textAlign = androidx.compose.ui.text.style.TextAlign.Center)
           YearArrow("Next year", "›", year < today.year) { year++ }
         }
-        (1..12).chunked(4).forEach { row ->
-          Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            row.forEach { value ->
-              val enabled = YearMonth.of(year, value) <= YearMonth.from(today)
-              val selected = value == month
-              Box(Modifier.weight(1f).heightIn(min = 48.dp).background(if (selected && enabled) spec.accent else spec.surfaceAlt)
-                .clickable(enabled = enabled, role = Role.Button) { month = value }.padding(vertical = 10.dp), contentAlignment = Alignment.Center) {
-                Text(YearMonth.of(year, value).format(DateTimeFormatter.ofPattern("MMM")), style = MaterialTheme.typography.labelMedium,
-                  color = if (!enabled) spec.muted.copy(alpha = 0.4f) else if (selected) spec.onAccent else spec.ink)
+        if (kind == ReportPeriodKind.YEAR) {
+          Text("MONTH-BY-MONTH ACTIVITY FOR THE SELECTED YEAR", style = MaterialTheme.typography.bodySmall, color = spec.muted)
+        } else {
+          (1..12).chunked(4).forEach { row ->
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+              row.forEach { value ->
+                val enabled = YearMonth.of(year, value) <= YearMonth.from(today)
+                val selected = value == month
+                Box(Modifier.weight(1f).heightIn(min = 48.dp).background(if (selected && enabled) spec.accent else spec.surfaceAlt)
+                  .clickable(enabled = enabled, role = Role.Button) { month = value }.padding(vertical = 10.dp), contentAlignment = Alignment.Center) {
+                  Text(YearMonth.of(year, value).format(DateTimeFormatter.ofPattern("MMM")), style = MaterialTheme.typography.labelMedium,
+                    color = if (!enabled) spec.muted.copy(alpha = 0.4f) else if (selected) spec.onAccent else spec.ink)
+                }
               }
             }
           }

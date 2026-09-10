@@ -22,10 +22,18 @@ class FinanceTrackerApplication : Application() {
     super.onCreate()
     SyncVersion.initialize(this)
     container = AppContainer(this)
+    container.recurringNotifications.createChannel()
 
     // Seed the guest partition once; this does not change the active owner.
     container.applicationScope.launch {
       GuestSeeder.seedGuestDefaults(container.appDatabase, GUEST_OWNER_ID)
+    }
+
+    // Recurrence is entirely local and follows whichever partition is active.
+    container.applicationScope.launch {
+      container.sessionManager.session.collectLatest { active ->
+        container.recurringScheduler.requestNow()
+      }
     }
 
     // Background sync: periodic, network-constrained. Sign-out cancels it.

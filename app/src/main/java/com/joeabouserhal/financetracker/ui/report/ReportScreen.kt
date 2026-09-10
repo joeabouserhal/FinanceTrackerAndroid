@@ -54,6 +54,7 @@ private val PeriodSaver = listSaver<ReportPeriod, String>(
 internal fun ReportPeriod.label(today: LocalDate): String = when (kind) {
   ReportPeriodKind.ALL -> "All time"
   ReportPeriodKind.MONTH -> if (month == YearMonth.from(today)) "This month" else month.format(DateTimeFormatter.ofPattern("MMM yyyy"))
+  ReportPeriodKind.YEAR -> if (month.year == today.year) "This year" else month.year.toString()
   ReportPeriodKind.CUSTOM -> requireNotNull(custom).label()
 }
 
@@ -116,6 +117,7 @@ internal fun ReportContent(
   var detailCurrency by rememberSaveable { mutableStateOf<String?>(null) }
   var detailCategory by rememberSaveable { mutableStateOf<String?>(null) }
   var currencyChoice by rememberSaveable { mutableStateOf<String?>(null) }
+  var selectedBucket by rememberSaveable { mutableStateOf<Int?>(null) }
   if (savedOwner != ownerId) {
     savedOwner = ownerId
     period = ReportPeriod(month = YearMonth.from(today))
@@ -127,6 +129,7 @@ internal fun ReportContent(
     detailCurrency = null
     detailCategory = null
     currencyChoice = null
+    selectedBucket = null
   }
   val currencyOptions = currencies.sortedByDescending { it.isDefault }
   val selectedCurrency = currencyOptions.firstOrNull { it.id == currencyChoice } ?: currencyOptions.firstOrNull()
@@ -140,6 +143,11 @@ internal fun ReportContent(
   val reports = remember(items, currencies, reportFilters, period, viewType, today) {
     buildReports(items, currencies, viewType, period, reportFilters, today)
   }
+  LaunchedEffect(period, reportFilters, viewType, selectedCurrency?.id) {
+    selectedBucket = null
+    detailCategory = null
+    detailCurrency = null
+  }
   val activeCount = reportRefinementCount(reportFilters.copy(currencyIds = emptySet()))
   val listState = key(ownerId) { rememberLazyListState() }
   val tone = if (viewType == TransactionType.EXPENSE) spec.expense else spec.income
@@ -148,16 +156,25 @@ internal fun ReportContent(
     item("header") { ScreenHeader(title = "Report") }
     reportSection("period") {
       Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
-        if (period.kind == ReportPeriodKind.MONTH) {
-          PeriodArrow("Previous month", "‹") { period = period.copy(month = period.month.minusMonths(1)); expanded = emptyList() }
+        if (period.kind == ReportPeriodKind.MONTH || period.kind == ReportPeriodKind.YEAR) {
+          PeriodArrow("Previous ${if (period.kind == ReportPeriodKind.YEAR) "year" else "month"}", "‹") {
+            period = period.copy(month = if (period.kind == ReportPeriodKind.YEAR) period.month.minusYears(1) else period.month.minusMonths(1))
+            expanded = emptyList()
+            selectedBucket = null
+          }
         }
         Column(Modifier.weight(1f).clickable(role = Role.Button) { periodOpen = true }.padding(horizontal = 8.dp, vertical = 8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
           Text(period.label(today), style = MaterialTheme.typography.titleMedium, color = spec.ink)
-          Text(if (period.kind == ReportPeriodKind.MONTH && period.month == YearMonth.from(today)) "Through ${today.format(DateTimeFormatter.ofPattern("d MMM"))} · Change range" else "Change range",
+          Text(if ((period.kind == ReportPeriodKind.MONTH || period.kind == ReportPeriodKind.YEAR) && period.month.year == today.year) "Through ${today.format(DateTimeFormatter.ofPattern("d MMM"))} · Change range" else "Change range",
             style = MaterialTheme.typography.bodySmall, color = spec.muted)
         }
-        if (period.kind == ReportPeriodKind.MONTH) {
-          PeriodArrow("Next month", "›", enabled = period.month < YearMonth.from(today)) { period = period.copy(month = period.month.plusMonths(1)); expanded = emptyList() }
+        if (period.kind == ReportPeriodKind.MONTH || period.kind == ReportPeriodKind.YEAR) {
+          val nextAllowed = if (period.kind == ReportPeriodKind.YEAR) period.month.year < today.year else period.month < YearMonth.from(today)
+          PeriodArrow("Next ${if (period.kind == ReportPeriodKind.YEAR) "year" else "month"}", "›", enabled = nextAllowed) {
+            period = period.copy(month = if (period.kind == ReportPeriodKind.YEAR) period.month.plusYears(1) else period.month.plusMonths(1))
+            expanded = emptyList()
+            selectedBucket = null
+          }
         }
       }
     }
@@ -180,13 +197,18 @@ internal fun ReportContent(
               filters = filters.copy(accountIds = emptySet(), currencyIds = emptySet())
               detailCategory = null
               detailCurrency = null
+              selectedBucket = null
             }
           }, modifier = Modifier.testTag("report-currency:${currency.id}").semantics { selected = selectedCurrency?.id == currency.id }, comfortable = true)
         }
       }
     }
     if (filtersOpen) reportSection("filters") {
-      refinementPanel(reportFilters, { filters = it.copy(currencyIds = emptySet()); expanded = emptyList() }, if (viewType == TransactionType.EXPENSE) TypeFilter.EXPENSE else TypeFilter.INCOME)
+      refinementPanel(reportFilters, {
+        filters = it.copy(currencyIds = emptySet())
+        expanded = emptyList()
+        selectedBucket = null
+      }, if (viewType == TransactionType.EXPENSE) TypeFilter.EXPENSE else TypeFilter.INCOME)
     }
     if (reports.isEmpty()) reportSection("empty") {
       EmptyState(if (items.isEmpty()) "No transactions yet — add some to see a report."
@@ -194,9 +216,38 @@ internal fun ReportContent(
     }
     reports.forEach { report ->
       reportSection("summary:${report.currencyId}") { ReportHeadline(report, viewType, period, today) }
-      reportSection("chart:${report.currencyId}") { key(period, viewType, filters) { TrendChart(report, tone, Modifier.padding(horizontal = 16.dp)) } }
-      reportSection("categories:${report.currencyId}") { Text("BY CATEGORY", style = MaterialTheme.typography.labelSmall, color = spec.muted, modifier = Modifier.padding(start = 16.dp, top = 4.dp, bottom = 12.dp)) }
-      val shown = if (report.currencyId in expanded) report.categories else report.categories.take(5)
+      val bucket = selectedBucket?.let { report.buckets.getOrNull(it) }
+      val categories = bucket?.categories ?: report.categories
+      reportSection("chart:${report.currencyId}") {
+        key(period, viewType, filters, report.currencyId) {
+          TrendChart(
+            report = report,
+            tone = tone,
+            period = period,
+            selected = selectedBucket,
+            onSelect = { index -> selectedBucket = index; expanded = emptyList(); detailCategory = null },
+            onClearSelection = { selectedBucket = null; expanded = emptyList() },
+            modifier = Modifier.padding(horizontal = 16.dp),
+          )
+        }
+      }
+      reportSection("categories:${report.currencyId}") {
+        Text(
+          if (bucket == null) "BY CATEGORY" else "BY CATEGORY · ${bucket.window.label().uppercase()}",
+          style = MaterialTheme.typography.labelSmall,
+          color = spec.muted,
+          modifier = Modifier.padding(start = 16.dp, top = 4.dp, bottom = 12.dp),
+        )
+      }
+      if (categories.isEmpty()) reportSection("categories-empty:${report.currencyId}") {
+        Text(
+          if (bucket == null) "No category activity in this range." else "No activity on this ${if (period.kind == ReportPeriodKind.YEAR) "month" else "day"}.",
+          style = MaterialTheme.typography.bodySmall,
+          color = spec.muted,
+          modifier = Modifier.padding(horizontal = 16.dp),
+        )
+      }
+      val shown = if (report.currencyId in expanded) categories else categories.take(5)
       itemsIndexed(shown, key = { _, category -> "category:${report.currencyId}:${category.id}" }) { categoryIndex, category ->
         Column(Modifier.padding(horizontal = 16.dp).fillMaxWidth().background(spec.surface)
           .testTag("report-category:${report.currencyId}:${category.id}")) {
@@ -204,8 +255,8 @@ internal fun ReportContent(
           CategoryReportRow(category, report.symbol, Modifier) { detailCurrency = report.currencyId; detailCategory = category.id }
         }
       }
-      if (report.categories.size > 5) reportSection("expand:${report.currencyId}") {
-        Text(if (report.currencyId in expanded) "Show less" else "Show all categories (${report.categories.size})", style = MaterialTheme.typography.labelMedium, color = spec.accent,
+      if (categories.size > 5) reportSection("expand:${report.currencyId}") {
+        Text(if (report.currencyId in expanded) "Show less" else "Show all categories (${categories.size})", style = MaterialTheme.typography.labelMedium, color = spec.accent,
           modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp).clickable(role = Role.Button) {
             expanded = if (report.currencyId in expanded) expanded - report.currencyId else expanded + report.currencyId
           }.padding(vertical = 14.dp))
@@ -215,8 +266,9 @@ internal fun ReportContent(
   if (periodOpen) ReportPeriodDialog(period, today, onDismiss = { periodOpen = false }, onSelect = { period = it; periodOpen = false; expanded = emptyList() })
   if (detailCategory != null) {
     val report = reports.firstOrNull { it.currencyId == detailCurrency }
-    val category = report?.categories?.firstOrNull { it.id == detailCategory }
-    CategoryDetailsDialog(category, report?.symbol.orEmpty(), period.label(today), onDismiss = { detailCategory = null; detailCurrency = null })
+    val bucket = selectedBucket?.let { report?.buckets?.getOrNull(it) }
+    val category = (bucket?.categories ?: report?.categories.orEmpty()).firstOrNull { it.id == detailCategory }
+    CategoryDetailsDialog(category, report?.symbol.orEmpty(), bucket?.window?.label() ?: period.label(today), onDismiss = { detailCategory = null; detailCurrency = null })
   }
 }
 
@@ -271,42 +323,106 @@ private fun ReportHeadline(report: CurrencyReport, viewType: TransactionType, pe
     Text(if (viewType == TransactionType.EXPENSE) "TOTAL SPENT" else "TOTAL EARNED", style = MaterialTheme.typography.labelSmall, color = spec.muted)
     Text(compactCurrencyText(report.totalMinor, report.symbol), style = MaterialTheme.typography.headlineLarge, color = tone, fontWeight = FontWeight.Bold)
     Text("${report.count} transaction${if (report.count == 1) "" else "s"}", style = MaterialTheme.typography.bodySmall, color = spec.muted)
-    if (report.previousTotalMinor != null) {
-      val comparisonLabel = if (period.kind == ReportPeriodKind.MONTH && period.month == YearMonth.from(today)) "same period last month" else if (period.kind == ReportPeriodKind.MONTH) "last month" else "previous period"
-      val change = report.changePercent
-      Text(when {
-        change == null -> "No previous activity"
-        kotlin.math.abs(change) < 0.05 -> "Unchanged vs $comparisonLabel"
-        else -> "${String.format(Locale.getDefault(), "%.1f", kotlin.math.abs(change))}% ${if (change > 0) "more" else "less"} vs $comparisonLabel"
-      }, style = MaterialTheme.typography.bodySmall, color = spec.muted)
+    if (report.previousTotalMinor != null && report.changePercent != null) {
+      val comparisonLabel = when (period.kind) {
+        ReportPeriodKind.MONTH -> if (period.month == YearMonth.from(today)) "same period last month" else "last month"
+        ReportPeriodKind.YEAR -> "previous year"
+        else -> "previous period"
+      }
+      val change = requireNotNull(report.changePercent)
+      Text(
+        if (kotlin.math.abs(change) < 0.05) "Unchanged vs $comparisonLabel"
+        else "${String.format(Locale.getDefault(), "%.1f", kotlin.math.abs(change))}% ${if (change > 0) "more" else "less"} vs $comparisonLabel",
+        style = MaterialTheme.typography.bodySmall,
+        color = spec.muted,
+      )
     }
   }
 }
 
 @Composable
-private fun TrendChart(report: CurrencyReport, tone: Color, modifier: Modifier = Modifier) {
+private fun TrendChart(
+  report: CurrencyReport,
+  tone: Color,
+  period: ReportPeriod,
+  selected: Int?,
+  onSelect: (Int) -> Unit,
+  onClearSelection: () -> Unit,
+  modifier: Modifier = Modifier,
+) {
   val spec = LocalThemeSpec.current
-  var selected by rememberSaveable(report.currencyId) { mutableStateOf<Int?>(null) }
   val buckets = report.buckets
   val selectedBucket = selected?.let { buckets.getOrNull(it) }
   val maximum = buckets.maxOfOrNull { it.amountMinor }?.coerceAtLeast(1L) ?: 1L
-  Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-    Row(Modifier.fillMaxWidth().height(120.dp).testTag("trend:${report.currencyId}"), horizontalArrangement = Arrangement.spacedBy(2.dp), verticalAlignment = Alignment.Bottom) {
-      buckets.forEachIndexed { index, bucket ->
-        val fraction = (bucket.amountMinor.toDouble() / maximum).toFloat().coerceIn(0f, 1f)
-        Box(Modifier.weight(1f).fillMaxHeight().testTag("bucket:${report.currencyId}:$index").semantics { contentDescription = "${bucket.window.label()}: ${Money.format(bucket.amountMinor, report.symbol)}" }
-          .clickable(role = Role.Button) { selected = index }, contentAlignment = Alignment.BottomCenter) {
-          Box(Modifier.widthIn(max = 14.dp).fillMaxWidth().height(if (fraction == 0f) 1.dp else maxOf(2.dp, 112.dp * fraction))
-            .background(if (fraction == 0f) spec.border.copy(alpha = 0.35f) else tone.copy(alpha = if (selected == null || selected == index) 1f else 0.35f)))
+  val labelFormat = if (period.kind == ReportPeriodKind.YEAR) DateTimeFormatter.ofPattern("MMM") else DateTimeFormatter.ofPattern("d")
+  Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    Text(
+      if (period.kind == ReportPeriodKind.YEAR) "${period.month.year} · MONTH BY MONTH"
+      else period.month.format(DateTimeFormatter.ofPattern("MMMM yyyy")).uppercase(),
+      style = MaterialTheme.typography.labelSmall,
+      color = spec.muted,
+    )
+    BoxWithConstraints(Modifier.fillMaxWidth()) {
+      // A bar is never narrower than a reliable touch target, and the
+      // viewport never exposes more than twelve bars at once.
+      val barWidth = maxOf(36.dp, maxWidth / 12)
+      Row(
+        Modifier
+          .fillMaxWidth()
+          .height(148.dp)
+          .horizontalScroll(rememberScrollState())
+          .testTag("trend:${report.currencyId}"),
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+        verticalAlignment = Alignment.Bottom,
+      ) {
+        buckets.forEachIndexed { index, bucket ->
+          val fraction = (bucket.amountMinor.toDouble() / maximum).toFloat().coerceIn(0f, 1f)
+          Column(
+            Modifier
+              .width(barWidth)
+              .fillMaxHeight()
+              .testTag("bucket:${report.currencyId}:$index")
+              .semantics { contentDescription = "${bucket.window.label()}: ${Money.format(bucket.amountMinor, report.symbol)}" }
+              .clickable(role = Role.Button) { onSelect(index) },
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Bottom,
+          ) {
+            Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.BottomCenter) {
+              Box(
+                Modifier
+                  .widthIn(max = 18.dp)
+                  .fillMaxWidth()
+                  .height(if (fraction == 0f) 2.dp else maxOf(3.dp, 112.dp * fraction))
+                  .background(if (fraction == 0f) spec.border.copy(alpha = 0.38f) else tone.copy(alpha = if (selected == null || selected == index) 1f else 0.28f)),
+              )
+            }
+            Spacer(Modifier.height(6.dp))
+            Text(
+              bucket.window.start.format(labelFormat).uppercase(),
+              style = MaterialTheme.typography.labelSmall,
+              color = if (selected == index) spec.ink else spec.muted,
+              maxLines = 1,
+            )
+          }
         }
       }
     }
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-      val dateFormat = DateTimeFormatter.ofPattern("d MMM yy")
-      Text(buckets.firstOrNull()?.window?.start?.format(dateFormat).orEmpty(), style = MaterialTheme.typography.labelSmall, color = spec.muted)
-      Text(buckets.lastOrNull()?.window?.end?.format(dateFormat).orEmpty(), style = MaterialTheme.typography.labelSmall, color = spec.muted)
+    Text(
+      selectedBucket?.let { "${it.window.label()} · ${Money.format(it.amountMinor, report.symbol)} · ${it.count} transaction${if (it.count == 1) "" else "s"}" }
+        ?: "Swipe through dates, then tap a bar to filter categories.",
+      style = MaterialTheme.typography.bodySmall,
+      color = spec.muted,
+      modifier = Modifier.heightIn(min = 32.dp),
+    )
+    if (selectedBucket != null) {
+      BrButton(
+        text = if (period.kind == ReportPeriodKind.YEAR) "CLEAR MONTH FILTER" else "CLEAR DAY FILTER",
+        onClick = onClearSelection,
+        style = BrButtonStyle.OUTLINE,
+        compact = true,
+        minHeight = 46.dp,
+      )
     }
-    Text(selectedBucket?.let { "${it.window.label()} · ${Money.format(it.amountMinor, report.symbol)}" } ?: "Tap a bar to inspect activity", style = MaterialTheme.typography.bodySmall, color = spec.muted, modifier = Modifier.heightIn(min = 32.dp))
   }
 }
 

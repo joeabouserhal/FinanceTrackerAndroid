@@ -76,6 +76,28 @@ class ReportModelTest {
     assertEquals(result.totalMinor, result.buckets.sumOf { it.amountMinor })
   }
 
+  @Test fun `selected daily bucket carries only that days categories`() {
+    val result = report(listOf(
+      tx("food", "2024-03-10", 250, category = "food"),
+      tx("rent", "2024-03-11", 900, category = "rent"),
+    )).single()
+    val day = result.buckets.single { it.window.start == LocalDate.parse("2024-03-10") }
+    assertEquals(250L, day.amountMinor)
+    assertEquals(1, day.count)
+    assertEquals(listOf("food"), day.categories.map { it.id })
+    assertEquals(1.0, day.categories.single().share, 0.0)
+  }
+
+  @Test fun `year view creates one month bucket for every month through today`() {
+    val year = ReportPeriod(ReportPeriodKind.YEAR, month = YearMonth.of(2024, 3))
+    val result = report(listOf(tx("jan", "2024-01-02", 100), tx("mar", "2024-03-31", 200)), year).single()
+    assertEquals(3, result.buckets.size)
+    assertEquals(100L, result.buckets[0].amountMinor)
+    assertEquals(0L, result.buckets[1].amountMinor)
+    assertEquals(200L, result.buckets[2].amountMinor)
+    assertEquals(ReportWindow(LocalDate.parse("2024-03-01"), LocalDate.parse("2024-03-31")), result.buckets.last().window)
+  }
+
   @Test fun `long ranges have contiguous bounded buckets with no missing money`() {
     val period = ReportPeriod(ReportPeriodKind.CUSTOM, custom = ReportWindow(LocalDate.parse("2020-01-01"), today))
     val result = report(listOf(tx("first", "2020-01-01", 123), tx("middle", "2022-04-10", 456), tx("last", "2024-03-31", 789)), period).single()

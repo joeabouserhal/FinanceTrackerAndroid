@@ -110,6 +110,41 @@ CREATE TABLE goals (
   deleted_at TIMESTAMPTZ
 );
 
+-- One optional recurring calendar schedule per preset. Occurrences make local catch-up,
+-- snoozes, and multi-device posting idempotent.
+CREATE TABLE recurring_schedules (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  preset_id UUID NOT NULL REFERENCES presets(id) ON DELETE CASCADE,
+  frequency TEXT NOT NULL CHECK (frequency IN ('daily','weekly','monthly','yearly')),
+  interval INTEGER NOT NULL DEFAULT 1 CHECK (interval BETWEEN 1 AND 365),
+  week_days TEXT,
+  monthly_rule TEXT NOT NULL DEFAULT 'day_of_month' CHECK (monthly_rule IN ('day_of_month','last_day','last_business_day','nth_weekday')),
+  day_of_month INTEGER,
+  nth_weekday INTEGER,
+  nth_ordinal INTEGER,
+  start_date DATE NOT NULL,
+  end_date DATE,
+  time_minutes INTEGER NOT NULL DEFAULT 540 CHECK (time_minutes BETWEEN 0 AND 1439),
+  paused BOOLEAN NOT NULL DEFAULT false,
+  blocked_reason TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(), updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  sync_version TEXT NOT NULL DEFAULT '', deleted_at TIMESTAMPTZ,
+  UNIQUE(user_id, preset_id)
+);
+CREATE TABLE recurring_occurrences (
+  id UUID PRIMARY KEY,
+  user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  schedule_id UUID NOT NULL REFERENCES recurring_schedules(id) ON DELETE CASCADE,
+  occurrence_key DATE NOT NULL,
+  state TEXT NOT NULL CHECK (state IN ('posted','verified','snoozed','skipped')),
+  effective_at BIGINT NOT NULL,
+  transaction_id UUID,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(), updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  sync_version TEXT NOT NULL DEFAULT '', deleted_at TIMESTAMPTZ,
+  UNIQUE(user_id, schedule_id, occurrence_key)
+);
+
 -- Transactions — the core record
 CREATE TABLE transactions (
   id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -124,6 +159,7 @@ CREATE TABLE transactions (
   notes         TEXT,
   preset_id     UUID REFERENCES presets(id) ON DELETE SET NULL,
   goal_id       UUID REFERENCES goals(id) ON DELETE SET NULL,
+  recurrence_occurrence_id UUID,
   created_at    TIMESTAMPTZ DEFAULT now(),
   updated_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
   sync_version  TEXT NOT NULL DEFAULT '',
@@ -154,6 +190,11 @@ CREATE INDEX idx_transactions_category_id  ON transactions(category_id);
 CREATE INDEX idx_transactions_account_id   ON transactions(account_id);
 CREATE INDEX idx_transactions_preset_id    ON transactions(preset_id);
 CREATE INDEX idx_transactions_goal_id      ON transactions(goal_id);
+CREATE INDEX idx_transactions_recurrence_occurrence_id ON transactions(recurrence_occurrence_id);
+CREATE INDEX idx_recurring_schedules_user_cursor ON recurring_schedules(user_id, updated_at, id);
+CREATE INDEX idx_recurring_occurrences_user_cursor ON recurring_occurrences(user_id, updated_at, id);
+CREATE INDEX idx_recurring_schedules_preset_id ON recurring_schedules(preset_id);
+CREATE INDEX idx_recurring_occurrences_schedule_id ON recurring_occurrences(schedule_id);
 CREATE INDEX idx_goals_currency_id         ON goals(currency_id);
 CREATE INDEX idx_goals_account_id          ON goals(account_id);
 CREATE INDEX idx_goals_sync_cursor         ON goals(user_id, updated_at, id);
@@ -177,11 +218,13 @@ ALTER TABLE presets       ENABLE ROW LEVEL SECURITY;
 ALTER TABLE transactions  ENABLE ROW LEVEL SECURITY;
 ALTER TABLE profiles      ENABLE ROW LEVEL SECURITY;
 ALTER TABLE goals         ENABLE ROW LEVEL SECURITY;
+ALTER TABLE recurring_schedules ENABLE ROW LEVEL SECURITY;
+ALTER TABLE recurring_occurrences ENABLE ROW LEVEL SECURITY;
 
 DO $$
 DECLARE t text;
 BEGIN
-  FOREACH t IN ARRAY ARRAY['currencies','categories','accounts','presets','goals','transactions','profiles']
+  FOREACH t IN ARRAY ARRAY['currencies','categories','accounts','presets','goals','recurring_schedules','recurring_occurrences','transactions','profiles']
   LOOP
     EXECUTE format('DROP POLICY IF EXISTS %I_select ON %I', t, t);
     EXECUTE format('DROP POLICY IF EXISTS %I_insert ON %I', t, t);
@@ -206,6 +249,8 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON presets       TO authenticated;
 GRANT SELECT, INSERT, UPDATE, DELETE ON transactions  TO authenticated;
 GRANT SELECT, INSERT, UPDATE, DELETE ON profiles      TO authenticated;
 GRANT SELECT, INSERT, UPDATE, DELETE ON goals         TO authenticated;
+GRANT SELECT, INSERT, UPDATE, DELETE ON recurring_schedules TO authenticated;
+GRANT SELECT, INSERT, UPDATE, DELETE ON recurring_occurrences TO authenticated;
 
 -- =============================================================================
 -- 5. updated_at maintenance (server is the timestamp authority for LWW sync)
@@ -228,6 +273,8 @@ CREATE TRIGGER set_presets_updated_at      BEFORE INSERT OR UPDATE ON presets   
 CREATE TRIGGER set_transactions_updated_at BEFORE INSERT OR UPDATE ON transactions FOR EACH ROW EXECUTE FUNCTION touch_updated_at();
 CREATE TRIGGER set_profiles_updated_at     BEFORE INSERT OR UPDATE ON profiles     FOR EACH ROW EXECUTE FUNCTION touch_updated_at();
 CREATE TRIGGER set_goals_updated_at        BEFORE INSERT OR UPDATE ON goals        FOR EACH ROW EXECUTE FUNCTION touch_updated_at();
+CREATE TRIGGER set_recurring_schedules_updated_at BEFORE INSERT OR UPDATE ON recurring_schedules FOR EACH ROW EXECUTE FUNCTION touch_updated_at();
+CREATE TRIGGER set_recurring_occurrences_updated_at BEFORE INSERT OR UPDATE ON recurring_occurrences FOR EACH ROW EXECUTE FUNCTION touch_updated_at();
 
 -- =============================================================================
 -- 6. Signup trigger — seed default data
@@ -305,7 +352,7 @@ CREATE TABLE IF NOT EXISTS public.sync_operations (
 -- A delete that arrives before an insert must still prevent resurrection.
 CREATE TABLE IF NOT EXISTS public.sync_deleted_records (
   user_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
-  table_name text NOT NULL CHECK (table_name IN ('currencies','categories','accounts','presets','goals','transactions')),
+  table_name text NOT NULL CHECK (table_name IN ('currencies','categories','accounts','presets','recurring_schedules','recurring_occurrences','goals','transactions')),
   record_id uuid NOT NULL,
   sync_version text NOT NULL,
   deleted_at timestamptz NOT NULL DEFAULT now(),
@@ -352,7 +399,7 @@ DECLARE
   v_other_default text;
 BEGIN
   IF v_user IS NULL THEN RAISE EXCEPTION USING ERRCODE='42501', MESSAGE='Sign in to sync'; END IF;
-  IF p_table IS NULL OR p_table NOT IN ('currencies','categories','accounts','presets','goals','transactions','profiles')
+  IF p_table IS NULL OR p_table NOT IN ('currencies','categories','accounts','presets','recurring_schedules','recurring_occurrences','goals','transactions','profiles')
      OR p_action IS NULL OR p_action NOT IN ('insert','update','delete')
      OR jsonb_typeof(p_payload) IS DISTINCT FROM 'object' OR p_operation_id IS NULL THEN
     RAISE EXCEPTION USING ERRCODE='22023', MESSAGE='Invalid sync mutation';
@@ -418,6 +465,7 @@ BEGIN
       ('category_id','categories'),('default_category_id','categories'),
       ('account_id','accounts'),('default_account_id','accounts'),
       ('preset_id','presets'),('goal_id','goals')
+      ,('schedule_id','recurring_schedules')
     ) AS refs(col,parent_table) LOOP
       IF nullif(v_data->>v_ref.col,'') IS NOT NULL THEN
         EXECUTE format('SELECT to_jsonb(t) FROM public.%I t WHERE id=$1 AND user_id=$2',v_ref.parent_table)

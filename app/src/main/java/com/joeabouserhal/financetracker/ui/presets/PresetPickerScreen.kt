@@ -39,6 +39,8 @@ fun PresetPickerScreen(
   val categories by remember(ownerId) { container.categoryRepository.observeAll(ownerId) }
     .collectAsStateWithLifecycle(initialValue = emptyList())
 
-  PresetLibrary(ownerId, presets, currencies, accounts, categories, filter, { filter = it }, onBack,
-    onSelect = { onPick(it.id) }, modifier = modifier)
+  PresetLibrary(
+    ownerId = ownerId, presets = presets, currencies = currencies, accounts = accounts, categories = categories,
+    filter = filter, onFilter = { filter = it }, onBack = onBack, onSelect = { onPick(it.id) }, modifier = modifier,
+  )
 }

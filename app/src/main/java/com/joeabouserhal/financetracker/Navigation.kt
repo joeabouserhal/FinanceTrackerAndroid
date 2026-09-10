@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
@@ -48,7 +49,11 @@ import kotlinx.coroutines.launch
  * Auth, the transaction form, and account screens are pushed on top.
  */
 @Composable
-fun MainNavigation(onReady: () -> Unit = {}) {
+fun MainNavigation(
+  shortcutDestination: LauncherShortcutDestination? = null,
+  onShortcutHandled: () -> Unit = {},
+  onReady: () -> Unit = {},
+) {
   val container = rememberAppContainer()
   val scope = rememberCoroutineScope()
   val session by container.sessionManager.session.collectAsStateWithLifecycle(initialValue = null)
@@ -68,6 +73,15 @@ fun MainNavigation(onReady: () -> Unit = {}) {
 
   key(initial) {
     val backStack = rememberNavBackStack(initial)
+    LaunchedEffect(shortcutDestination, needsAuth) {
+      if (shortcutDestination != null && !needsAuth) {
+        when (shortcutDestination) {
+          LauncherShortcutDestination.AddTransaction -> backStack.add(AddTransaction(presetId = null))
+          LauncherShortcutDestination.AddFromPreset -> backStack.add(PresetPicker)
+        }
+        onShortcutHandled()
+      }
+    }
     NavDisplay(
       backStack = backStack,
       onBack = { backStack.removeLastOrNull() },

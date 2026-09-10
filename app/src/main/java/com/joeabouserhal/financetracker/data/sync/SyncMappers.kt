@@ -8,6 +8,11 @@ import com.joeabouserhal.financetracker.data.local.entities.PresetEntity
 import com.joeabouserhal.financetracker.data.local.entities.ProfileEntity
 import com.joeabouserhal.financetracker.data.local.entities.TransactionEntity
 import com.joeabouserhal.financetracker.data.local.entities.TransactionType
+import com.joeabouserhal.financetracker.data.local.entities.RecurringOccurrenceEntity
+import com.joeabouserhal.financetracker.data.local.entities.RecurringOccurrenceState
+import com.joeabouserhal.financetracker.data.local.entities.RecurringScheduleEntity
+import com.joeabouserhal.financetracker.data.local.entities.RecurrenceFrequency
+import com.joeabouserhal.financetracker.data.local.entities.MonthlyRule
 import java.time.Instant
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
@@ -96,6 +101,16 @@ object SyncMappers {
       deletedAt = row.optString("deleted_at"),
     )
 
+  fun recurringSchedule(row: JsonObject): RecurringScheduleEntity =
+    RecurringScheduleEntity(row.reqString("id"), row.reqString("user_id"), row.reqString("preset_id"),
+      RecurrenceFrequency.valueOf(row.reqString("frequency").uppercase()), row.reqLong("interval").toInt(), row.optString("week_days"),
+      MonthlyRule.valueOf(row.reqString("monthly_rule").uppercase()), row.optLong("day_of_month")?.toInt(), row.optLong("nth_weekday")?.toInt(), row.optLong("nth_ordinal")?.toInt(),
+      row.reqString("start_date"), row.optString("end_date"), row.reqLong("time_minutes").toInt(), row.optBool("paused"), row.optString("blocked_reason"), row.createdAt(), row.reqString("updated_at"), row.optString("sync_version") ?: row.reqString("updated_at"), row.optString("deleted_at"))
+
+  fun recurringOccurrence(row: JsonObject): RecurringOccurrenceEntity =
+    RecurringOccurrenceEntity(row.reqString("id"), row.reqString("user_id"), row.reqString("schedule_id"), row.reqString("occurrence_key"),
+      RecurringOccurrenceState.valueOf(row.reqString("state").uppercase()), row.reqLong("effective_at"), row.optString("transaction_id"), row.createdAt(), row.reqString("updated_at"), row.optString("sync_version") ?: row.reqString("updated_at"), row.optString("deleted_at"))
+
   fun transaction(row: JsonObject): TransactionEntity =
     TransactionEntity(
       id = row.reqString("id"),
@@ -110,6 +125,7 @@ object SyncMappers {
       notes = row.optString("notes"),
       presetId = row.optString("preset_id"),
       goalId = row.optString("goal_id"),
+      recurrenceOccurrenceId = row.optString("recurrence_occurrence_id"),
       createdAt = row.createdAt(),
       updatedAt = row.reqString("updated_at"),
       syncVersion = row.optString("sync_version") ?: row.reqString("updated_at"),

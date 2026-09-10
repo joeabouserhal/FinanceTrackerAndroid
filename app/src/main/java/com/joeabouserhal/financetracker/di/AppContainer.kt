@@ -19,6 +19,9 @@ import com.joeabouserhal.financetracker.data.repositories.GoalRepository
 import com.joeabouserhal.financetracker.data.repositories.PresetRepository
 import com.joeabouserhal.financetracker.data.repositories.ProfileRepository
 import com.joeabouserhal.financetracker.data.repositories.TransactionRepository
+import com.joeabouserhal.financetracker.data.recurring.RecurringNotifications
+import com.joeabouserhal.financetracker.data.recurring.RecurringRepository
+import com.joeabouserhal.financetracker.data.recurring.RecurringScheduler
 import com.joeabouserhal.financetracker.data.session.SessionManager
 import com.joeabouserhal.financetracker.data.settings.SettingsRepository
 import com.joeabouserhal.financetracker.data.sync.ConnectivityMonitor
@@ -66,6 +69,9 @@ class AppContainer(context: Context) {
     TransactionRepository(appDatabase.transactionDao(), appDatabase.categoryDao(), categoryRepository, appDatabase.goalDao(), appDatabase)
   val goalRepository: GoalRepository =
     GoalRepository(appDatabase.goalDao(), categoryRepository, transactionRepository, appDatabase)
+  val recurringRepository: RecurringRepository = RecurringRepository(appDatabase, transactionRepository)
+  val recurringScheduler: RecurringScheduler = RecurringScheduler(appContext, recurringRepository)
+  val recurringNotifications: RecurringNotifications = RecurringNotifications(appContext)
   val profileRepository: ProfileRepository = ProfileRepository(appDatabase.profileDao(), appDatabase)
   val dashboardRepository: DashboardRepository =
     DashboardRepository(

@@ -9,27 +9,47 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.core.view.WindowCompat
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.joeabouserhal.financetracker.theme.FinanceTrackerTheme
 import com.joeabouserhal.financetracker.theme.LocalThemeSpec
 import com.joeabouserhal.financetracker.ui.launch.SplashExitAnimation
 import com.joeabouserhal.financetracker.ui.launch.launchAnimationsEnabled
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 
 private const val MIN_SPLASH_MILLIS = 220L
 private const val MAX_SPLASH_WAIT_MILLIS = 1_500L
 
+private const val ACTION_ADD_TRANSACTION = "com.joeabouserhal.financetracker.action.ADD_TRANSACTION"
+private const val ACTION_ADD_FROM_PRESET = "com.joeabouserhal.financetracker.action.ADD_FROM_PRESET"
+
+enum class LauncherShortcutDestination {
+  AddTransaction,
+  AddFromPreset,
+}
+
+private fun android.content.Intent?.launcherShortcutDestination(): LauncherShortcutDestination? =
+  when (this?.action) {
+    ACTION_ADD_TRANSACTION -> LauncherShortcutDestination.AddTransaction
+    ACTION_ADD_FROM_PRESET -> LauncherShortcutDestination.AddFromPreset
+    else -> null
+  }
+
 class MainActivity : ComponentActivity() {
   private var splashExitAnimation: SplashExitAnimation? = null
+  private val launcherShortcutDestination = MutableStateFlow<LauncherShortcutDestination?>(null)
 
   override fun onCreate(savedInstanceState: Bundle?) {
     val splashScreen = installSplashScreen()
     super.onCreate(savedInstanceState)
+    launcherShortcutDestination.value = intent.launcherShortcutDestination()
 
     val animateLaunch = savedInstanceState == null && launchAnimationsEnabled(this)
     var minimumElapsed = !animateLaunch
@@ -61,6 +81,7 @@ class MainActivity : ComponentActivity() {
 
     enableEdgeToEdge()
     setContent {
+      val shortcutDestination by launcherShortcutDestination.collectAsStateWithLifecycle()
       FinanceTrackerTheme(onReady = { themeReady = true }) {
         val darkTheme = LocalThemeSpec.current.isDark
         SideEffect {
@@ -70,10 +91,20 @@ class MainActivity : ComponentActivity() {
           }
         }
         Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-          MainNavigation(onReady = { destinationReady = true })
+          MainNavigation(
+            shortcutDestination = shortcutDestination,
+            onShortcutHandled = { launcherShortcutDestination.value = null },
+            onReady = { destinationReady = true },
+          )
         }
       }
     }
+  }
+
+  override fun onNewIntent(intent: android.content.Intent) {
+    super.onNewIntent(intent)
+    setIntent(intent)
+    launcherShortcutDestination.value = intent.launcherShortcutDestination()
   }
 
   override fun onStop() {

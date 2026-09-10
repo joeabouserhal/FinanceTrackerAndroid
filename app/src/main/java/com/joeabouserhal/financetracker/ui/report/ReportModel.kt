@@ -11,7 +11,7 @@ import java.time.LocalDate
 import java.time.YearMonth
 import java.time.temporal.ChronoUnit
 
-internal enum class ReportPeriodKind { MONTH, CUSTOM, ALL }
+internal enum class ReportPeriodKind { MONTH, YEAR, CUSTOM, ALL }
 
 internal data class ReportWindow(val start: LocalDate, val end: LocalDate) {
   init { require(!end.isBefore(start)) }
@@ -28,6 +28,10 @@ internal data class ReportPeriod(
     ReportPeriodKind.ALL -> null
     ReportPeriodKind.CUSTOM -> requireNotNull(custom)
     ReportPeriodKind.MONTH -> ReportWindow(month.atDay(1), if (month == YearMonth.from(today)) today else month.atEndOfMonth())
+    ReportPeriodKind.YEAR -> ReportWindow(
+      LocalDate.of(month.year, 1, 1),
+      if (month.year == today.year) today else LocalDate.of(month.year, 12, 31),
+    )
   }
 
   fun previous(today: LocalDate): ReportWindow? = when (kind) {
@@ -36,10 +40,16 @@ internal data class ReportPeriod(
     ReportPeriodKind.MONTH -> month.minusMonths(1).let { prior ->
       ReportWindow(prior.atDay(1), if (month == YearMonth.from(today)) prior.atDay(minOf(today.dayOfMonth, prior.lengthOfMonth())) else prior.atEndOfMonth())
     }
+    ReportPeriodKind.YEAR -> ReportWindow(LocalDate.of(month.year - 1, 1, 1), LocalDate.of(month.year - 1, 12, 31))
   }
 }
 
-internal data class ReportBucket(val window: ReportWindow, val amountMinor: Long)
+internal data class ReportBucket(
+  val window: ReportWindow,
+  val amountMinor: Long,
+  val count: Int,
+  val categories: List<CategoryReport>,
+)
 internal data class CategoryReport(
   val id: String,
   val name: String,
@@ -93,20 +103,50 @@ internal fun buildReports(
       val currency = currencyById[id] ?: return@mapNotNull null
       val current = dated.map { it.first }
       val total = current.sumOf { it.transaction.amount }
-      val categories = current.groupBy { it.transaction.categoryId }.map { (categoryId, transactions) ->
-        val amount = transactions.sumOf { it.transaction.amount }
-        CategoryReport(categoryId, transactions.first().categoryName, transactions.first().categoryColor,
-          amount, if (total > 0) amount.toDouble() / total else 0.0, transactions)
-      }.sortedWith(compareByDescending<CategoryReport> { it.amountMinor }.thenBy { it.name }.thenBy { it.id })
+      val categories = categoryReports(current, total)
       val chartWindow = window ?: ReportWindow(dated.minOf { it.second }, dated.maxOf { it.second })
-      val bucketDays = (chartWindow.days + 30) / 31
-      val totalsByBucket = dated.groupBy { ChronoUnit.DAYS.between(chartWindow.start, it.second) / bucketDays }
-        .mapValues { (_, group) -> group.sumOf { it.first.transaction.amount } }
-      val buckets = (0L until (chartWindow.days + bucketDays - 1) / bucketDays).map { index ->
-        val start = chartWindow.start.plusDays(index * bucketDays)
-        ReportBucket(ReportWindow(start, minOf(start.plusDays(bucketDays - 1), chartWindow.end)), totalsByBucket[index] ?: 0L)
-      }
+      val buckets = buildBuckets(dated, chartWindow, period.kind)
       CurrencyReport(id, currency.code, currency.name, currency.symbol, total,
         if (previous != null) priorTotals[id] ?: 0L else null, current.size, categories, buckets)
     }
+}
+
+private fun categoryReports(transactions: List<TransactionListItem>, total: Long): List<CategoryReport> =
+  transactions.groupBy { it.transaction.categoryId }.map { (categoryId, group) ->
+    val amount = group.sumOf { it.transaction.amount }
+    CategoryReport(
+      categoryId,
+      group.first().categoryName,
+      group.first().categoryColor,
+      amount,
+      if (total > 0) amount.toDouble() / total else 0.0,
+      group,
+    )
+  }.sortedWith(compareByDescending<CategoryReport> { it.amountMinor }.thenBy { it.name }.thenBy { it.id })
+
+private fun buildBuckets(
+  dated: List<Pair<TransactionListItem, LocalDate>>,
+  chartWindow: ReportWindow,
+  kind: ReportPeriodKind,
+): List<ReportBucket> {
+  if (kind == ReportPeriodKind.YEAR) {
+    return (1..12).mapNotNull { month ->
+      val start = LocalDate.of(chartWindow.start.year, month, 1)
+      if (start.isAfter(chartWindow.end)) return@mapNotNull null
+      val window = ReportWindow(start, minOf(YearMonth.from(start).atEndOfMonth(), chartWindow.end))
+      val transactions = dated.filter { (_, date) -> date in window }.map { it.first }
+      ReportBucket(window, transactions.sumOf { it.transaction.amount }, transactions.size, categoryReports(transactions, transactions.sumOf { it.transaction.amount }))
+    }
+  }
+
+  // Month reports keep an exact daily bar. Longer custom/all-time ranges are
+  // grouped to at most twelve selectable windows so touch targets stay usable.
+  val bucketDays = if (kind == ReportPeriodKind.MONTH) 1L else (chartWindow.days + 11) / 12
+  return (0L until (chartWindow.days + bucketDays - 1) / bucketDays).map { index ->
+    val start = chartWindow.start.plusDays(index * bucketDays)
+    val window = ReportWindow(start, minOf(start.plusDays(bucketDays - 1), chartWindow.end))
+    val transactions = dated.filter { (_, date) -> date in window }.map { it.first }
+    val total = transactions.sumOf { it.transaction.amount }
+    ReportBucket(window, total, transactions.size, categoryReports(transactions, total))
+  }
 }

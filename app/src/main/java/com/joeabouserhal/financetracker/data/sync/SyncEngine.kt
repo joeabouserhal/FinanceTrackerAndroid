@@ -183,6 +183,8 @@ class SyncEngine(
       "categories" -> rows.forEach { row -> applyCategory(ownerId, SyncMappers.category(row)) }
       "accounts" -> rows.forEach { row -> applyAccount(ownerId, SyncMappers.account(row)) }
       "presets" -> rows.forEach { row -> applyPreset(ownerId, SyncMappers.preset(row)) }
+      "recurring_schedules" -> rows.forEach { row -> applyRecurringSchedule(ownerId, SyncMappers.recurringSchedule(row)) }
+      "recurring_occurrences" -> rows.forEach { row -> applyRecurringOccurrence(ownerId, SyncMappers.recurringOccurrence(row)) }
       "goals" -> rows.forEach { row -> applyGoal(ownerId, SyncMappers.goal(row)) }
       "transactions" -> rows.forEach { row -> applyTransaction(ownerId, SyncMappers.transaction(row)) }
       "profiles" -> rows.forEach { row -> applyProfile(ownerId, SyncMappers.profile(row)) }
@@ -239,6 +241,16 @@ class SyncEngine(
       local == null -> dao.insertAll(listOf(remote))
       remote.deletedAt != null || SyncMappers.remoteAtLeastAsNew(local.syncVersion, remote.syncVersion) -> dao.replaceFromSync(remote)
     }
+  }
+
+  private suspend fun applyRecurringSchedule(ownerId: String, remote: com.joeabouserhal.financetracker.data.local.entities.RecurringScheduleEntity) {
+    val dao = db.recurringScheduleDao(); val local = dao.getById(ownerId, remote.id)
+    when { local == null -> dao.insertIgnore(remote); remote.deletedAt != null || SyncMappers.remoteAtLeastAsNew(local.syncVersion, remote.syncVersion) -> dao.replaceFromSync(remote) }
+  }
+
+  private suspend fun applyRecurringOccurrence(ownerId: String, remote: com.joeabouserhal.financetracker.data.local.entities.RecurringOccurrenceEntity) {
+    val dao = db.recurringOccurrenceDao(); val local = dao.getById(ownerId, remote.id)
+    when { local == null -> dao.insertIgnore(remote); remote.deletedAt != null || SyncMappers.remoteAtLeastAsNew(local.syncVersion, remote.syncVersion) -> dao.replaceFromSync(remote) }
   }
 
   private suspend fun applyTransaction(ownerId: String, remote: com.joeabouserhal.financetracker.data.local.entities.TransactionEntity) {

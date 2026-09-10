@@ -11,6 +11,9 @@ import com.joeabouserhal.financetracker.data.local.entities.CategoryEntity
 import com.joeabouserhal.financetracker.data.local.entities.CurrencyEntity
 import com.joeabouserhal.financetracker.data.local.entities.PresetEntity
 import com.joeabouserhal.financetracker.data.local.entities.TransactionType
+import com.joeabouserhal.financetracker.data.local.entities.RecurringScheduleEntity
+import com.joeabouserhal.financetracker.data.recurring.RecurrenceCalculator
+import java.time.LocalDate
 import com.joeabouserhal.financetracker.theme.LocalThemeSpec
 import com.joeabouserhal.financetracker.R
 import com.joeabouserhal.financetracker.ui.components.ManagementListRow
@@ -28,6 +31,7 @@ fun PresetRowView(
   currencies: List<CurrencyEntity>,
   accounts: List<AccountEntity>,
   categories: List<CategoryEntity>,
+  schedule: RecurringScheduleEntity? = null,
   onTap: () -> Unit,
   divider: Boolean = false,
 ) {
@@ -36,7 +40,8 @@ fun PresetRowView(
   val currency = currencies.firstOrNull { it.id == preset.defaultCurrencyId }
   val account = accounts.firstOrNull { it.id == preset.defaultAccountId }
   val category = categories.firstOrNull { it.id == preset.defaultCategoryId }
-  val summary = listOfNotNull(category?.name, account?.name).joinToString(" · ")
+  val next = schedule?.takeIf { !it.paused }?.let { RecurrenceCalculator.next(it, LocalDate.now()) }
+  val summary = listOfNotNull(category?.name, account?.name, next?.let { "Repeats ${it}" }).joinToString(" · ")
 
   ManagementListRow(
     title = preset.name,

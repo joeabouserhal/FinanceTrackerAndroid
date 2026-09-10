@@ -11,6 +11,8 @@ import com.joeabouserhal.financetracker.data.local.dao.GoalDao
 import com.joeabouserhal.financetracker.data.local.dao.OutboxDao
 import com.joeabouserhal.financetracker.data.local.dao.PresetDao
 import com.joeabouserhal.financetracker.data.local.dao.ProfileDao
+import com.joeabouserhal.financetracker.data.local.dao.RecurringOccurrenceDao
+import com.joeabouserhal.financetracker.data.local.dao.RecurringScheduleDao
 import com.joeabouserhal.financetracker.data.local.dao.SyncMetaDao
 import com.joeabouserhal.financetracker.data.local.dao.TransactionDao
 import com.joeabouserhal.financetracker.data.local.entities.AccountEntity
@@ -22,6 +24,8 @@ import com.joeabouserhal.financetracker.data.local.entities.PresetEntity
 import com.joeabouserhal.financetracker.data.local.entities.ProfileEntity
 import com.joeabouserhal.financetracker.data.local.entities.SyncMetaEntity
 import com.joeabouserhal.financetracker.data.local.entities.TransactionEntity
+import com.joeabouserhal.financetracker.data.local.entities.RecurringOccurrenceEntity
+import com.joeabouserhal.financetracker.data.local.entities.RecurringScheduleEntity
 
 @Database(
   entities =
@@ -36,8 +40,10 @@ import com.joeabouserhal.financetracker.data.local.entities.TransactionEntity
       OutboxEntity::class,
       SyncMetaEntity::class,
       com.joeabouserhal.financetracker.data.local.entities.SyncHealthEntity::class,
+      RecurringScheduleEntity::class,
+      RecurringOccurrenceEntity::class,
     ],
-  version = 13,
+  version = 14,
   exportSchema = true,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -51,6 +57,8 @@ abstract class AppDatabase : RoomDatabase() {
   abstract fun outboxDao(): OutboxDao
   abstract fun syncMetaDao(): SyncMetaDao
   abstract fun syncHealthDao(): com.joeabouserhal.financetracker.data.local.dao.SyncHealthDao
+  abstract fun recurringScheduleDao(): RecurringScheduleDao
+  abstract fun recurringOccurrenceDao(): RecurringOccurrenceDao
 }
 
 /** Migration registry. Every schema change must add an entry here and bump [AppDatabase.version]. */
@@ -216,6 +224,42 @@ object Migrations {
     }
   }
 
+  val MIGRATION_13_14 = object : Migration(13, 14) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+      db.execSQL("ALTER TABLE `transactions` ADD COLUMN `recurrence_occurrence_id` TEXT DEFAULT NULL")
+      db.execSQL("CREATE INDEX IF NOT EXISTS `index_transactions_recurrence_occurrence_id` ON `transactions` (`recurrence_occurrence_id`)")
+      db.execSQL("""
+        CREATE TABLE IF NOT EXISTS `recurring_schedules` (
+          `id` TEXT NOT NULL, `owner_id` TEXT NOT NULL, `preset_id` TEXT NOT NULL,
+          `frequency` TEXT NOT NULL, `interval` INTEGER NOT NULL, `week_days` TEXT,
+          `monthly_rule` TEXT NOT NULL, `day_of_month` INTEGER, `nth_weekday` INTEGER,
+          `nth_ordinal` INTEGER, `start_date` TEXT NOT NULL, `end_date` TEXT,
+          `time_minutes` INTEGER NOT NULL, `paused` INTEGER NOT NULL,
+          `blocked_reason` TEXT, `created_at` TEXT NOT NULL, `updated_at` TEXT NOT NULL,
+          `sync_version` TEXT NOT NULL, `deleted_at` TEXT,
+          PRIMARY KEY(`id`),
+          FOREIGN KEY(`preset_id`) REFERENCES `presets`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE
+        )
+      """.trimIndent())
+      db.execSQL("CREATE INDEX IF NOT EXISTS `index_recurring_schedules_owner_id` ON `recurring_schedules` (`owner_id`)")
+      db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS `index_recurring_schedules_owner_id_preset_id` ON `recurring_schedules` (`owner_id`, `preset_id`)")
+      db.execSQL("CREATE INDEX IF NOT EXISTS `index_recurring_schedules_preset_id` ON `recurring_schedules` (`preset_id`)")
+      db.execSQL("""
+        CREATE TABLE IF NOT EXISTS `recurring_occurrences` (
+          `id` TEXT NOT NULL, `owner_id` TEXT NOT NULL, `schedule_id` TEXT NOT NULL,
+          `occurrence_key` TEXT NOT NULL, `state` TEXT NOT NULL, `effective_at` INTEGER NOT NULL,
+          `transaction_id` TEXT, `created_at` TEXT NOT NULL, `updated_at` TEXT NOT NULL,
+          `sync_version` TEXT NOT NULL, `deleted_at` TEXT,
+          PRIMARY KEY(`id`),
+          FOREIGN KEY(`schedule_id`) REFERENCES `recurring_schedules`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE
+        )
+      """.trimIndent())
+      db.execSQL("CREATE INDEX IF NOT EXISTS `index_recurring_occurrences_owner_id` ON `recurring_occurrences` (`owner_id`)")
+      db.execSQL("CREATE INDEX IF NOT EXISTS `index_recurring_occurrences_schedule_id` ON `recurring_occurrences` (`schedule_id`)")
+      db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS `index_recurring_occurrences_owner_id_schedule_id_occurrence_key` ON `recurring_occurrences` (`owner_id`, `schedule_id`, `occurrence_key`)")
+    }
+  }
+
   val ALL: Array<Migration> =
-    arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13)
+    arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14)
 }

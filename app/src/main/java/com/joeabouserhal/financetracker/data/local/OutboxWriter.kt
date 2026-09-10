@@ -8,6 +8,8 @@ import com.joeabouserhal.financetracker.data.local.entities.OutboxAction
 import com.joeabouserhal.financetracker.data.local.entities.OutboxEntity
 import com.joeabouserhal.financetracker.data.local.entities.PresetEntity
 import com.joeabouserhal.financetracker.data.local.entities.ProfileEntity
+import com.joeabouserhal.financetracker.data.local.entities.RecurringOccurrenceEntity
+import com.joeabouserhal.financetracker.data.local.entities.RecurringScheduleEntity
 import com.joeabouserhal.financetracker.data.local.entities.TransactionEntity
 import com.joeabouserhal.financetracker.data.sync.SyncVersion
 import java.time.Instant
@@ -134,8 +136,27 @@ object OutboxWriter {
         "notes" to (e.notes?.let { JsonPrimitive(it) } ?: JsonNull),
         "preset_id" to (e.presetId?.let { JsonPrimitive(it) } ?: JsonNull),
         "goal_id" to (e.goalId?.let { JsonPrimitive(it) } ?: JsonNull),
+        "recurrence_occurrence_id" to (e.recurrenceOccurrenceId?.let { JsonPrimitive(it) } ?: JsonNull),
       ),
     )
+
+  fun recurringSchedule(ownerId: String, e: RecurringScheduleEntity): JsonObject =
+    merge(base(e.id, ownerId, e.createdAt, e.syncVersion, e.deletedAt), json(
+      "preset_id" to JsonPrimitive(e.presetId), "frequency" to JsonPrimitive(e.frequency.name.lowercase()),
+      "interval" to JsonPrimitive(e.interval), "week_days" to (e.weekDays?.let(::JsonPrimitive) ?: JsonNull),
+      "monthly_rule" to JsonPrimitive(e.monthlyRule.name.lowercase()), "day_of_month" to (e.dayOfMonth?.let(::JsonPrimitive) ?: JsonNull),
+      "nth_weekday" to (e.nthWeekday?.let(::JsonPrimitive) ?: JsonNull), "nth_ordinal" to (e.nthOrdinal?.let(::JsonPrimitive) ?: JsonNull),
+      "start_date" to JsonPrimitive(e.startDate), "end_date" to (e.endDate?.let(::JsonPrimitive) ?: JsonNull),
+      "time_minutes" to JsonPrimitive(e.timeMinutes), "paused" to JsonPrimitive(e.paused),
+      "blocked_reason" to (e.blockedReason?.let(::JsonPrimitive) ?: JsonNull),
+    ))
+
+  fun recurringOccurrence(ownerId: String, e: RecurringOccurrenceEntity): JsonObject =
+    merge(base(e.id, ownerId, e.createdAt, e.syncVersion, e.deletedAt), json(
+      "schedule_id" to JsonPrimitive(e.scheduleId), "occurrence_key" to JsonPrimitive(e.occurrenceKey),
+      "state" to JsonPrimitive(e.state.name.lowercase()), "effective_at" to JsonPrimitive(e.effectiveAt),
+      "transaction_id" to (e.transactionId?.let(::JsonPrimitive) ?: JsonNull),
+    ))
 
   fun profile(ownerId: String, e: ProfileEntity): JsonObject =
     json(
