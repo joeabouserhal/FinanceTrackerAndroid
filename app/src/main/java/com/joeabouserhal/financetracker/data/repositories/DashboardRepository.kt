@@ -22,6 +22,8 @@ data class CurrencyBalance(
   val currency: CurrencyEntity,
   val totalMinor: Long,
   val accounts: List<AccountBalance>,
+  /** True when at least one historical transaction used this currency. */
+  val hasActivity: Boolean = false,
 )
 
 data class MonthlyActivity(
@@ -79,11 +81,17 @@ class DashboardRepository(
         val currency = currencyById[account.currencyId] ?: return@mapNotNull null
         AccountBalance(account, currency, netByAccount[account.id] ?: 0L)
       }
+    val currenciesWithActivity = allTransactions.asSequence().map { it.currencyId }.toSet()
 
     val balances =
       currencies.map { currency ->
         val perAccount = accountBalances.filter { it.currency.id == currency.id }
-        CurrencyBalance(currency, perAccount.sumOf { it.balanceMinor }, perAccount)
+        CurrencyBalance(
+          currency = currency,
+          totalMinor = perAccount.sumOf { it.balanceMinor },
+          accounts = perAccount,
+          hasActivity = currency.id in currenciesWithActivity,
+        )
       }
         .sortedBy { if (it.currency.isDefault) 0 else 1 }
 

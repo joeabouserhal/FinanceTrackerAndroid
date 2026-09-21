@@ -9,6 +9,7 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -19,6 +20,8 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.only
@@ -49,12 +52,17 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -70,6 +78,8 @@ import com.joeabouserhal.financetracker.ui.components.BrSegmentedToggle
 import com.joeabouserhal.financetracker.ui.components.BrTextField
 import com.joeabouserhal.financetracker.ui.components.ThousandsSeparatorTransformation
 import com.joeabouserhal.financetracker.ui.rememberAppContainer
+import com.joeabouserhal.financetracker.utils.AmountExpression
+import com.joeabouserhal.financetracker.utils.AmountExpressionResult
 import com.joeabouserhal.financetracker.utils.Dates
 import com.joeabouserhal.financetracker.utils.Money
 import java.math.BigDecimal
@@ -79,7 +89,7 @@ import java.time.LocalDate
 import java.time.ZoneOffset
 import kotlinx.coroutines.launch
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun TransactionFormScreen(
   transactionId: String?,
@@ -112,6 +122,20 @@ fun TransactionFormScreen(
   var showCategoryModal by remember { mutableStateOf(false) }
   var categorySearch by remember { mutableStateOf("") }
   var error by remember { mutableStateOf<String?>(null) }
+  var amountFocused by remember { mutableStateOf(false) }
+  var amountCursorRevision by remember { mutableStateOf(0) }
+  val amountCalculation = remember(amountText) { AmountExpression.evaluate(amountText) }
+  val hasPositivePlainAmount = remember(amountText, amountCalculation) {
+    amountCalculation is AmountExpressionResult.NotExpression &&
+      runCatching {
+        BigDecimal(Money.normalizeDecimalInput(amountText))
+          .setScale(2, RoundingMode.HALF_UP)
+          .movePointRight(2)
+          .longValueExact() > 0L
+      }.getOrDefault(false)
+  }
+  val keyboardVisible = WindowInsets.isImeVisible
+  val showAmountOperators = amountFocused && keyboardVisible
 
   // All categories are loaded once; the per-type view is derived locally so
   // a type switch never races the flow reload and can't clobber a selection
@@ -197,6 +221,17 @@ fun TransactionFormScreen(
   }
 
   fun save() {
+    when (val calculation = amountCalculation) {
+      is AmountExpressionResult.Valid -> {
+        error = "Tap OK to use the calculated amount"
+        return
+      }
+      is AmountExpressionResult.Invalid -> {
+        error = calculation.message
+        return
+      }
+      AmountExpressionResult.NotExpression -> Unit
+    }
     val amountMinor = try {
       BigDecimal(Money.normalizeDecimalInput(amountText)).setScale(2, RoundingMode.HALF_UP).movePointRight(2).longValueExact()
     } catch (_: Exception) {
@@ -313,7 +348,14 @@ fun TransactionFormScreen(
       val selectedCurrency = currencies.firstOrNull { it.id == selectedCurrencyId }
       AmountEditor(
         value = amountText,
-        onValueChange = { amountText = it },
+        onValueChange = { amountText = it; error = null },
+        cursorRevision = amountCursorRevision,
+        onFocusChanged = { amountFocused = it },
+        calculation = amountCalculation,
+        onAcceptCalculation = { result ->
+          amountText = AmountExpression.format(result)
+          error = null
+        },
         currencyCode = selectedCurrency?.code ?: "—",
         currencySymbol = selectedCurrency?.symbol ?: "",
         type = type,
@@ -407,22 +449,48 @@ fun TransactionFormScreen(
       Spacer(Modifier.height(18.dp))
     }
 
-    // Pinned action dock — visually separate from the scrolling entry fields.
-    Column(Modifier.fillMaxWidth().background(spec.surface)) {
-      Box(Modifier.fillMaxWidth().height(1.dp).background(spec.border.copy(alpha = 0.55f)))
-      Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        BrButton(text = if (transactionId == null) "ADD TRANSACTION" else "UPDATE TRANSACTION", onClick = { save() }, modifier = Modifier.fillMaxWidth())
-        if (transactionId != null) {
-          Text(
-            "DELETE TRANSACTION",
-            style = MaterialTheme.typography.labelMedium,
-            color = spec.expense,
-            modifier = Modifier
-              .fillMaxWidth()
-              .clickable { showDeleteConfirm = true }
-              .padding(vertical = 8.dp),
-            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-          )
+    // The keyboard replaces the normal action dock with amount operators.
+    // Closing it always restores the ordinary Add/Update action.
+    if (!keyboardVisible || showAmountOperators) {
+      Column(
+        Modifier
+          .fillMaxWidth()
+          .background(spec.surface)
+          .then(if (keyboardVisible) Modifier.imePadding() else Modifier),
+      ) {
+        Box(Modifier.fillMaxWidth().height(1.dp).background(spec.border.copy(alpha = 0.55f)))
+        Column(
+          Modifier.padding(horizontal = 16.dp, vertical = if (showAmountOperators) 8.dp else 16.dp),
+          verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+          if (showAmountOperators) {
+            AmountOperatorStrip(
+              onAppend = { token ->
+                amountText += token
+                amountCursorRevision += 1
+                error = null
+              },
+            )
+          } else {
+            BrButton(
+              text = if (transactionId == null) "ADD TRANSACTION" else "UPDATE TRANSACTION",
+              onClick = { save() },
+              enabled = hasPositivePlainAmount,
+              modifier = Modifier.fillMaxWidth(),
+            )
+            if (transactionId != null) {
+              Text(
+                "DELETE TRANSACTION",
+                style = MaterialTheme.typography.labelMedium,
+                color = spec.expense,
+                modifier = Modifier
+                  .fillMaxWidth()
+                  .clickable { showDeleteConfirm = true }
+                  .padding(vertical = 8.dp),
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+              )
+            }
+          }
         }
       }
     }
@@ -557,6 +625,10 @@ fun TransactionFormScreen(
 private fun AmountEditor(
   value: String,
   onValueChange: (String) -> Unit,
+  cursorRevision: Int,
+  onFocusChanged: (Boolean) -> Unit,
+  calculation: AmountExpressionResult,
+  onAcceptCalculation: (BigDecimal) -> Unit,
   currencyCode: String,
   currencySymbol: String,
   type: TransactionType,
@@ -565,6 +637,20 @@ private fun AmountEditor(
   val typeColor = if (type == TransactionType.INCOME) spec.income else spec.expense
   val typeLabel = if (type == TransactionType.INCOME) "MONEY IN" else "MONEY OUT"
   val amountTransformation = remember { ThousandsSeparatorTransformation() }
+  val focusRequester = remember { FocusRequester() }
+  var fieldValue by remember { mutableStateOf(TextFieldValue(value, TextRange(value.length))) }
+
+  LaunchedEffect(value) {
+    if (fieldValue.text != value) {
+      fieldValue = TextFieldValue(value, TextRange(value.length))
+    }
+  }
+  LaunchedEffect(cursorRevision) {
+    if (cursorRevision > 0) {
+      fieldValue = TextFieldValue(value, TextRange(value.length))
+      focusRequester.requestFocus()
+    }
+  }
 
   Column(
     Modifier
@@ -597,9 +683,15 @@ private fun AmountEditor(
         )
       }
       BasicTextField(
-        value = value,
-        onValueChange = onValueChange,
-        modifier = Modifier.weight(1f),
+        value = fieldValue,
+        onValueChange = { updated ->
+          fieldValue = updated
+          onValueChange(updated.text)
+        },
+        modifier = Modifier
+          .weight(1f)
+          .focusRequester(focusRequester)
+          .onFocusChanged { onFocusChanged(it.isFocused) },
         singleLine = true,
         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
         visualTransformation = amountTransformation,
@@ -607,7 +699,7 @@ private fun AmountEditor(
         cursorBrush = SolidColor(spec.accent),
         decorationBox = { innerTextField ->
           Box {
-            if (value.isBlank()) {
+            if (fieldValue.text.isBlank()) {
               Text("0.00", style = MaterialTheme.typography.headlineLarge, color = spec.muted.copy(alpha = 0.42f))
             }
             innerTextField()
@@ -615,7 +707,60 @@ private fun AmountEditor(
         },
       )
     }
+    when (calculation) {
+      is AmountExpressionResult.Valid -> {
+        Row(
+          Modifier.fillMaxWidth(),
+          verticalAlignment = Alignment.CenterVertically,
+          horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+          Text(
+            "= ${AmountExpression.format(calculation.value)}",
+            style = MaterialTheme.typography.titleMedium,
+            color = spec.ink.copy(alpha = 0.72f),
+            modifier = Modifier.weight(1f),
+          )
+          BrButton("OK", onClick = { onAcceptCalculation(calculation.value) }, compact = true, fillWidth = false)
+        }
+        Text("Apply the result before saving this transaction.", style = MaterialTheme.typography.bodySmall, color = spec.muted)
+      }
+      is AmountExpressionResult.Invalid ->
+        Text(calculation.message, style = MaterialTheme.typography.bodySmall, color = spec.expense)
+      AmountExpressionResult.NotExpression -> Unit
+    }
     Box(Modifier.fillMaxWidth().height(2.dp).background(typeColor.copy(alpha = 0.72f)))
+  }
+}
+
+@Composable
+private fun AmountOperatorStrip(onAppend: (String) -> Unit) {
+  val spec = LocalThemeSpec.current
+  Row(
+    Modifier
+      .fillMaxWidth()
+      .height(42.dp)
+      .background(spec.surface)
+      .border(spec.borderWidth, spec.border),
+  ) {
+    listOf(
+      "+" to "+",
+      "−" to "-",
+      "×" to "×",
+      "÷" to "/",
+    ).forEachIndexed { index, (label, token) ->
+      Box(
+        Modifier
+          .weight(1f)
+          .fillMaxHeight()
+          .clickable { onAppend(token) },
+        contentAlignment = Alignment.Center,
+      ) {
+        Text(label, style = MaterialTheme.typography.headlineMedium, color = spec.ink)
+      }
+      if (index < 3) {
+        Box(Modifier.width(1.dp).fillMaxHeight().background(spec.border))
+      }
+    }
   }
 }
 

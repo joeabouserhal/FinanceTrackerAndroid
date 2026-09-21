@@ -186,20 +186,21 @@ private fun DashedDivider() {
 @Composable
 private fun BalanceSection(balances: List<CurrencyBalance>) {
   val spec = LocalThemeSpec.current
-  // Zero balances add noise: only show currencies that actually have a balance.
-  val nonzeroBalances = balances.filter { it.totalMinor != 0L }
+  // Keep a zero total visible once the currency has historical activity.
+  // Only entirely unused currencies are omitted from the balance section.
+  val activeBalances = balances.filter { it.hasActivity }
   Column(verticalArrangement = Arrangement.spacedBy(20.dp)) {
     SectionLabel("BALANCE")
     when {
       balances.isEmpty() ->
         EmptyState(message = "No accounts yet — add a currency & account in Settings")
-      nonzeroBalances.isEmpty() ->
-        Text("All balances are zero.", style = MaterialTheme.typography.bodyMedium, color = spec.muted)
+      activeBalances.isEmpty() ->
+        Text("No currency activity yet.", style = MaterialTheme.typography.bodyMedium, color = spec.muted)
       else ->
-        nonzeroBalances.forEachIndexed { index, balance ->
+        activeBalances.forEachIndexed { index, balance ->
           CurrencyBalanceBlock(balance)
           // One receipt-style dashed rule between currency groups only.
-          if (index < nonzeroBalances.lastIndex) DashedDivider()
+          if (index < activeBalances.lastIndex) DashedDivider()
         }
     }
   }

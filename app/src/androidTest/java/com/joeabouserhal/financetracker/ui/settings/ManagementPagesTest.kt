@@ -82,7 +82,7 @@ class ManagementPagesTest {
     var selected = ""
     launch {
       var filter by remember { mutableStateOf(PresetFilter.ALL) }
-      PresetLibrary("guest", presets, currencies, accounts, categories, filter, { filter = it }, {}, { selected = it.id }, onAdd = {})
+      PresetLibrary("guest", presets, currencies, accounts, categories, emptyMap(), filter, { filter = it }, {}, { selected = it.id }, onAdd = {})
     }
     capture("management-presets.png")
     compose.onNodeWithText("SEARCH PRESETS").performTextInput("coffee")

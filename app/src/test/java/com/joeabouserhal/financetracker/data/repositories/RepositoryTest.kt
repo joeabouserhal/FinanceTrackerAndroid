@@ -197,6 +197,7 @@ class RepositoryTest {
     assertEquals(1, data.balances.size)
     val balance = data.balances.first()
     assertEquals(800L, balance.totalMinor)
+    assertTrue(balance.hasActivity)
     assertEquals(2, balance.accounts.size)
     assertEquals(1000L, balance.accounts.first { it.account.name == "Cash" }.balanceMinor)
     assertEquals(-200L, balance.accounts.first { it.account.name == "Card" }.balanceMinor)
@@ -205,6 +206,20 @@ class RepositoryTest {
     assertEquals(1000L, data.monthly.first().incomeMinor)
     assertEquals(200L, data.monthly.first().expenseMinor)
     assertEquals(2, data.recent.size)
+  }
+
+  @Test
+  fun `dashboard keeps activity marker when a currency balances back to zero`() = runTest {
+    val currency = currencyRepo.getAll(GUEST_OWNER_ID).first()
+    val cash = accountRepo.observeActive(GUEST_OWNER_ID).first().first()
+    val other = db.categoryDao().getDefaultOther(GUEST_OWNER_ID, TransactionType.EXPENSE)!!
+
+    transactionRepo.add(GUEST_OWNER_ID, TransactionType.INCOME, 500, currency.id, null, cash.id, "2026-08-10", null, null, null)
+    transactionRepo.add(GUEST_OWNER_ID, TransactionType.EXPENSE, 500, currency.id, other.id, cash.id, "2026-08-11", null, null, null)
+
+    val balance = dashboardRepo.observe(GUEST_OWNER_ID, "2026-08-01", "2026-08-31").first().balances.single()
+    assertEquals(0L, balance.totalMinor)
+    assertTrue(balance.hasActivity)
   }
 
   @Test
