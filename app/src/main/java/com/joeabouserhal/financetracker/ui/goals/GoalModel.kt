@@ -2,6 +2,8 @@ package com.joeabouserhal.financetracker.ui.goals
 
 import com.joeabouserhal.financetracker.data.local.entities.*
 import com.joeabouserhal.financetracker.utils.Money
+import com.joeabouserhal.financetracker.data.repositories.netAmount
+import com.joeabouserhal.financetracker.data.repositories.accountBalanceMap
 import java.math.BigDecimal
 import java.math.BigInteger
 import java.math.RoundingMode
@@ -37,17 +39,15 @@ internal fun buildProgress(
   val currencyById = currencies.associateBy { it.id }
   val accountById = accounts.associateBy { it.id }
   val netByAccount = buildAccountBalances(transactions, accounts)
-  val netByCurrency = transactions.groupBy { it.currencyId }.mapValues { (_, rows) -> rows.sumOf { signedAmount(it) } }
+  val netByCurrency = transactions.groupBy { it.currencyId }.mapValues { (_, rows) -> rows.sumOf { it.netAmount() } }
   return goals.map { goal ->
     GoalProgress(goal, currencyById[goal.currencyId], accountById[goal.accountId],
       if (goal.accountId != null) netByAccount[goal.accountId] ?: 0 else netByCurrency[goal.currencyId] ?: 0)
   }
 }
 
-private fun signedAmount(t: TransactionEntity) = if (t.type == TransactionType.INCOME) t.amount else -t.amount
-
 internal fun buildAccountBalances(transactions: List<TransactionEntity>, accounts: List<AccountEntity>): Map<String, Long> {
-  val net = transactions.groupBy { it.accountId }.mapValues { (_, rows) -> rows.sumOf { signedAmount(it) } }
+  val net = accountBalanceMap(transactions)
   return accounts.associate { it.id to (net[it.id] ?: 0L) }
 }
 

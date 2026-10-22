@@ -41,6 +41,7 @@ class TransactionRepository(
     goalId: String? = null,
     recurrenceOccurrenceId: String? = null,
   ): TransactionEntity {
+    require(type != TransactionType.TRANSFER) { "Use the transfer form to move funds" }
     require(amount > 0) { "Amount must be positive" }
     require(currencyId.isNotBlank()) { "Currency is required" }
     // Enforced category: fall back to the seeded "Other" of this type.
@@ -92,6 +93,7 @@ class TransactionRepository(
     // editable from the form, so it always survives — and a goal withdrawal
     // can never be flipped to income.
     val existing = dao.getById(ownerId, id)
+    require(existing?.type != TransactionType.TRANSFER && type != TransactionType.TRANSFER) { "Use the transfer form to edit this entry" }
     val effectiveType = if (existing?.goalId != null) TransactionType.GOAL else type
     // GOAL has no "Other" of its own type; goal withdrawals use the Goal category.
     val resolvedCategoryId =
@@ -160,6 +162,44 @@ class TransactionRepository(
         OutboxWriter.enqueue(db, ownerId, "transactions", OutboxAction.DELETE, OutboxWriter.deletePayload(id))
       }
     }
+  }
+
+  /** One row contains both account legs, committed with its outbox operation. */
+  suspend fun saveTransfer(
+    ownerId: String, id: String? = null, amount: Long, currencyId: String,
+    sourceAccountId: String, destinationAccountId: String, date: String,
+    title: String? = null, notes: String? = null,
+  ): TransactionEntity = db.withTransaction {
+    require(amount > 0) { "Amount must be positive" }
+    require(sourceAccountId != destinationAccountId) { "Choose two different accounts" }
+    require(runCatching { LocalDate.parse(date) }.isSuccess) { "Choose a valid date" }
+    val currency = db.currencyDao().getById(ownerId, currencyId)
+    require(currency != null && currency.deletedAt == null) { "Currency is unavailable" }
+    val existing = id?.let { dao.getById(ownerId, it) }
+    require(id == null || (existing != null && existing.deletedAt == null && existing.type == TransactionType.TRANSFER)) {
+      "This transfer no longer exists"
+    }
+    listOf(sourceAccountId, destinationAccountId).forEach { accountId ->
+      val account = db.accountDao().getById(ownerId, accountId)
+      require(account != null && account.deletedAt == null && account.currencyId == currencyId) {
+        "Both accounts must belong to this profile and use the selected currency"
+      }
+      require(!account.archived || accountId == existing?.accountId || accountId == existing?.destinationAccountId) {
+        "Choose an active account"
+      }
+    }
+    val now = java.time.Instant.now().toString()
+    val entity = TransactionEntity(
+      id = existing?.id ?: UUID.randomUUID().toString(), ownerId = ownerId,
+      type = TransactionType.TRANSFER, amount = amount, currencyId = currencyId,
+      categoryId = null, accountId = sourceAccountId, destinationAccountId = destinationAccountId,
+      date = date, title = title?.trim()?.takeIf { it.isNotBlank() }, notes = notes?.trim()?.takeIf { it.isNotBlank() },
+      presetId = null, goalId = null, createdAt = existing?.createdAt ?: now, updatedAt = now,
+    )
+    dao.upsert(entity)
+    OutboxWriter.enqueue(db, ownerId, "transactions", if (existing == null) OutboxAction.INSERT else OutboxAction.UPDATE,
+      OutboxWriter.transaction(ownerId, entity))
+    entity
   }
 
   private suspend fun resolveOther(ownerId: String, type: TransactionType): String =

@@ -28,6 +28,16 @@ class ReportModelTest {
     assertEquals(ReportWindow(LocalDate.parse("2024-02-01"), LocalDate.parse("2024-02-29")), month.previous(today))
   }
 
+  @Test fun `transfers do not change spending earning counts categories or comparisons`() {
+    val transfer = tx("move", "2024-03-10", 99999, type = TransactionType.TRANSFER).let {
+      it.copy(transaction = it.transaction.copy(categoryId = null, destinationAccountId = "bank"))
+    }
+    val prior = transfer.copy(transaction = transfer.transaction.copy(id = "prior-move", date = "2024-02-10"))
+    val expense = tx("expense", "2024-03-10", 300)
+    assertEquals(report(listOf(expense)), report(listOf(expense, transfer, prior)))
+    assertTrue(report(listOf(transfer, prior), view = TransactionType.INCOME).isEmpty())
+  }
+
   @Test fun `partial month uses matching elapsed days and excludes future activity`() {
     val now = LocalDate.parse("2024-03-10")
     assertEquals(LocalDate.parse("2024-02-10"), month.previous(now)!!.end)

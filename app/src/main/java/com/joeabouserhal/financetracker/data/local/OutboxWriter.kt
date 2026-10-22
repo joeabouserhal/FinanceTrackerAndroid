@@ -131,6 +131,7 @@ object OutboxWriter {
         "currency_id" to JsonPrimitive(e.currencyId),
         "category_id" to JsonPrimitive(e.categoryId),
         "account_id" to (e.accountId?.let { JsonPrimitive(it) } ?: JsonNull),
+        "destination_account_id" to (e.destinationAccountId?.let { JsonPrimitive(it) } ?: JsonNull),
         "date" to JsonPrimitive(e.date),
         "title" to (e.title?.let { JsonPrimitive(it) } ?: JsonNull),
         "notes" to (e.notes?.let { JsonPrimitive(it) } ?: JsonNull),

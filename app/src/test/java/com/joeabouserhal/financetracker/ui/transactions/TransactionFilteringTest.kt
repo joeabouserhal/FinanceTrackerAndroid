@@ -52,6 +52,19 @@ class TransactionFilteringTest {
     )
 
   @Test
+  fun `transfer is its own type and matches either account but never spending or earning`() {
+    val base = item("transfer", TransactionType.TRANSFER, 1200, "2026-10-02", accountId = "cash")
+    val transfer = base.copy(transaction = base.transaction.copy(categoryId = null, destinationAccountId = "bank"),
+      categoryName = "Transfer", accountName = "Cash", destinationAccountName = "Bank")
+    val rows = items + transfer
+    assertEquals(listOf(transfer), TransactionFiltering.apply(rows, TransactionFilterState(type = TypeFilter.TRANSFER)))
+    assertEquals(listOf(transfer), TransactionFiltering.apply(rows, TransactionFilterState(accountIds = setOf("bank"))))
+    assertEquals(listOf(transfer), TransactionFiltering.apply(rows, TransactionFilterState(search = "Bank")))
+    assertTrue(transfer !in TransactionFiltering.apply(rows, TransactionFilterState(type = TypeFilter.EXPENSE)))
+    assertTrue(transfer !in TransactionFiltering.apply(rows, TransactionFilterState(type = TypeFilter.INCOME)))
+  }
+
+  @Test
   fun `type filter`() {
     val result = TransactionFiltering.apply(items, TransactionFilterState(type = TypeFilter.INCOME))
     assertEquals(listOf("t1"), result.map { it.transaction.id })

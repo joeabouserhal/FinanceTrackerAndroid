@@ -2,7 +2,6 @@ package com.joeabouserhal.financetracker.ui.components
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
@@ -17,6 +16,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.Role
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.ui.unit.dp
 import com.joeabouserhal.financetracker.theme.LocalThemeSpec
 
@@ -31,18 +32,21 @@ fun BrChip(
   large: Boolean = false,
   comfortable: Boolean = false,
   suffix: String? = null,
+  enabled: Boolean = true,
 ) {
   val spec = LocalThemeSpec.current
-  val face = if (selected) spec.accent else spec.surface
-  val content = if (selected) spec.onAccent else spec.ink
+  val modal = LocalModalStyle.current
+  val face = if (!enabled) spec.surfaceAlt else if (selected) spec.accent else if (modal) Color.Transparent else spec.surface
+  val content = if (!enabled) spec.muted.copy(alpha = 0.6f) else if (selected) spec.onAccent else spec.ink
 
   Row(
     modifier =
       modifier
         .minimumInteractiveComponentSize()
         .background(face)
-        .border(spec.borderWidth, if (selected) spec.accent else spec.border)
-        .clickable(onClick = onClick)
+        .then(if (modal && selected && enabled) Modifier else Modifier.border(spec.borderWidth,
+          if (!enabled) spec.border.copy(alpha = 0.45f) else if (selected) spec.accent else spec.border))
+        .selectable(selected = selected, enabled = enabled, role = Role.Checkbox, onClick = onClick)
         .padding(
           horizontal = when {
             large -> 16.dp
@@ -58,7 +62,7 @@ fun BrChip(
     verticalAlignment = Alignment.CenterVertically,
   ) {
     if (colorDot != null) {
-      Box(Modifier.size(if (large) 14.dp else if (comfortable) 13.dp else 12.dp).background(colorDot))
+      Box(Modifier.size(if (large) 14.dp else if (comfortable) 13.dp else 12.dp).background(if (enabled) colorDot else colorDot.copy(alpha = 0.45f)))
       Spacer(Modifier.width(6.dp))
     }
     Text(
@@ -71,7 +75,7 @@ fun BrChip(
       Text(
         text = "(${suffix.uppercase()})",
         style = MaterialTheme.typography.labelSmall,
-        color = if (selected) content.copy(alpha = 0.72f) else spec.muted,
+        color = if (!enabled || selected) content.copy(alpha = 0.72f) else spec.muted,
       )
     }
   }

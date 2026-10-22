@@ -64,9 +64,7 @@ fun CurrenciesAccountsScreen(
   val transactions by remember(ownerId) { container.transactionRepository.observeAll(ownerId) }
     .collectAsStateWithLifecycle(initialValue = emptyList())
   val balances = remember(transactions, ownerId) {
-    transactions.filter { it.ownerId == ownerId && it.accountId != null }.groupBy { requireNotNull(it.accountId) }.mapValues { (_, rows) ->
-      rows.sumOf { if (it.type == TransactionType.INCOME) it.amount else -it.amount }
-    }
+    com.joeabouserhal.financetracker.data.repositories.accountBalanceMap(transactions.filter { it.ownerId == ownerId })
   }
   var archivingAccount by remember(ownerId) { mutableStateOf<AccountEntity?>(null) }
   var deletingAccount by remember(ownerId) { mutableStateOf<AccountEntity?>(null) }

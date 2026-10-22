@@ -19,7 +19,7 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import com.joeabouserhal.financetracker.theme.LocalThemeSpec
 
-/** Outlined text field forced into the brutalist look: sharp corners, 2dp border, mono text. */
+/** Square, outlined fields shared by screens and dialogs. */
 @Composable
 fun BrTextField(
   value: String,
@@ -38,18 +38,7 @@ fun BrTextField(
   onTrailingIconClick: (() -> Unit)? = null,
 ) {
   val spec = LocalThemeSpec.current
-  OutlinedTextField(
-    value = value,
-    onValueChange = onValueChange,
-    modifier = modifier.fillMaxWidth(),
-    enabled = enabled,
-    label = { Text(label, style = MaterialTheme.typography.labelMedium) },
-    singleLine = singleLine,
-    shape = RectangleShape,
-    keyboardOptions = keyboardOptions,
-    visualTransformation = visualTransformation,
-    suffix = suffix,
-    leadingIcon = leadingIconRes?.let { iconRes ->
+  val leading: (@Composable () -> Unit)? = leadingIconRes?.let { iconRes ->
       {
         Icon(
           painter = painterResource(iconRes),
@@ -58,8 +47,8 @@ fun BrTextField(
           modifier = Modifier.size(20.dp),
         )
       }
-    },
-    trailingIcon = trailingIconRes?.let { iconRes ->
+    }
+  val trailing: (@Composable () -> Unit)? = trailingIconRes?.let { iconRes ->
       {
         if (onTrailingIconClick != null) {
           IconButton(onClick = onTrailingIconClick) {
@@ -79,7 +68,20 @@ fun BrTextField(
           )
         }
       }
-    },
+    }
+  OutlinedTextField(
+    value = value,
+    onValueChange = onValueChange,
+    modifier = modifier.fillMaxWidth(),
+    enabled = enabled,
+    label = { Text(label, style = MaterialTheme.typography.labelMedium) },
+    singleLine = singleLine,
+    shape = RectangleShape,
+    keyboardOptions = keyboardOptions,
+    visualTransformation = visualTransformation,
+    suffix = suffix,
+    leadingIcon = leading,
+    trailingIcon = trailing,
     textStyle = MaterialTheme.typography.bodyLarge.copy(color = spec.ink),
     colors =
       OutlinedTextFieldDefaults.colors(

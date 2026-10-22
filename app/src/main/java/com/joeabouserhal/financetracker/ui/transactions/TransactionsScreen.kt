@@ -77,6 +77,7 @@ fun TransactionsScreen(
   onAddTransaction: () -> Unit,
   onAddFromPreset: () -> Unit,
   onEditTransaction: (String) -> Unit,
+  onTransfer: () -> Unit = {},
 ) {
   val container = rememberAppContainer()
   val spec = LocalThemeSpec.current
@@ -210,6 +211,7 @@ fun TransactionsScreen(
       exit = fadeOut(tween(90)),
     ) {
       ExpandableFab(
+        onTransfer = onTransfer,
         onAddTransaction = onAddTransaction,
         onAddFromPreset = onAddFromPreset,
       )
@@ -218,9 +220,9 @@ fun TransactionsScreen(
 
   deleteTarget?.let { item ->
     val tx = item.transaction
-    val amount = if (tx.type == TransactionType.INCOME) tx.amount else -tx.amount
+    val amount = if (tx.type == TransactionType.INCOME || tx.type == TransactionType.TRANSFER) tx.amount else -tx.amount
     BrDialog(
-      title = "DELETE TRANSACTION?",
+      title = if (tx.type == TransactionType.TRANSFER) "DELETE TRANSFER?" else "DELETE TRANSACTION?",
       onDismiss = { deleteTarget = null },
       confirmText = "DELETE",
       onConfirm = {
@@ -245,11 +247,12 @@ fun TransactionsScreen(
         Text(
           Money.format(amount, item.currencySymbol),
           style = MaterialTheme.typography.titleLarge,
-          color = if (amount < 0) spec.expense else spec.income,
+          color = if (tx.type == TransactionType.TRANSFER) spec.transfer else if (amount < 0) spec.expense else spec.income,
         )
         Text(
           if (tx.type == TransactionType.GOAL)
             "This also un-completes its goal and removes the goal's other withdrawals."
+          else if (tx.type == TransactionType.TRANSFER) "This reverses the transfer in both accounts."
           else "This removes it permanently.",
           style = MaterialTheme.typography.bodySmall,
           color = spec.muted,

@@ -149,10 +149,10 @@ CREATE TABLE recurring_occurrences (
 CREATE TABLE transactions (
   id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id       UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
-  type          VARCHAR(10) NOT NULL CHECK (type IN ('income', 'expense', 'goal')),
+  type          VARCHAR(10) NOT NULL CHECK (type IN ('income', 'expense', 'goal', 'transfer')),
   amount        BIGINT NOT NULL CHECK (amount > 0),  -- minor units, always positive
   currency_id   UUID NOT NULL REFERENCES currencies(id) ON DELETE RESTRICT,
-  category_id   UUID NOT NULL REFERENCES categories(id) ON DELETE RESTRICT,
+  category_id   UUID REFERENCES categories(id) ON DELETE RESTRICT,
   account_id    UUID REFERENCES accounts(id) ON DELETE SET NULL,
   date          DATE NOT NULL DEFAULT CURRENT_DATE,
   title         TEXT,
@@ -525,3 +525,61 @@ $function$;
 REVOKE ALL ON FUNCTION public.apply_sync_mutation(text,text,jsonb,text,uuid) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.apply_sync_mutation(text,text,jsonb,text,uuid) TO authenticated;
 -- END SYNC REPAIR PROTOCOL
+
+-- Same-currency transfers. One transaction records both account legs.
+BEGIN;
+ALTER TABLE public.transactions ADD COLUMN IF NOT EXISTS destination_account_id uuid REFERENCES public.accounts(id) ON DELETE RESTRICT;
+ALTER TABLE public.transactions ALTER COLUMN category_id DROP NOT NULL;
+ALTER TABLE public.transactions DROP CONSTRAINT IF EXISTS transactions_type_check;
+ALTER TABLE public.transactions ADD CONSTRAINT transactions_type_check CHECK (type IN ('income','expense','goal','transfer'));
+ALTER TABLE public.transactions ADD CONSTRAINT transactions_transfer_shape CHECK (
+  (type='transfer' AND account_id IS NOT NULL AND destination_account_id IS NOT NULL AND account_id<>destination_account_id
+    AND category_id IS NULL AND preset_id IS NULL AND goal_id IS NULL AND recurrence_occurrence_id IS NULL)
+  OR (type<>'transfer' AND destination_account_id IS NULL AND category_id IS NOT NULL)
+);
+CREATE INDEX IF NOT EXISTS idx_transactions_destination_account_id ON public.transactions(destination_account_id);
+
+CREATE OR REPLACE FUNCTION public.validate_transfer_accounts()
+RETURNS trigger LANGUAGE plpgsql SET search_path = '' AS $$
+DECLARE source public.accounts%ROWTYPE; destination public.accounts%ROWTYPE;
+BEGIN
+  IF NEW.type<>'transfer' OR NEW.deleted_at IS NOT NULL THEN RETURN NEW; END IF;
+  SELECT * INTO source FROM public.accounts WHERE id=NEW.account_id AND user_id=NEW.user_id FOR SHARE;
+  SELECT * INTO destination FROM public.accounts WHERE id=NEW.destination_account_id AND user_id=NEW.user_id FOR SHARE;
+  IF source.id IS NULL OR destination.id IS NULL OR source.deleted_at IS NOT NULL OR destination.deleted_at IS NOT NULL THEN
+    RAISE EXCEPTION USING ERRCODE='23503', MESSAGE='Transfer accounts are unavailable or belong to another profile';
+  END IF;
+  IF source.currency_id<>NEW.currency_id OR destination.currency_id<>NEW.currency_id THEN
+    RAISE EXCEPTION USING ERRCODE='23514', MESSAGE='Transfer accounts must use the same currency';
+  END IF;
+  IF TG_OP='INSERT' THEN
+    IF source.archived OR destination.archived THEN
+      RAISE EXCEPTION USING ERRCODE='23514', MESSAGE='Choose active transfer accounts';
+    END IF;
+  ELSIF (source.archived AND NEW.account_id IS DISTINCT FROM OLD.account_id AND NEW.account_id IS DISTINCT FROM OLD.destination_account_id)
+     OR (destination.archived AND NEW.destination_account_id IS DISTINCT FROM OLD.account_id AND NEW.destination_account_id IS DISTINCT FROM OLD.destination_account_id) THEN
+    RAISE EXCEPTION USING ERRCODE='23514', MESSAGE='Choose active transfer accounts';
+  END IF;
+  RETURN NEW;
+END;
+$$;
+REVOKE EXECUTE ON FUNCTION public.validate_transfer_accounts() FROM PUBLIC, anon, authenticated;
+CREATE TRIGGER validate_transaction_transfer BEFORE INSERT OR UPDATE ON public.transactions
+  FOR EACH ROW EXECUTE FUNCTION public.validate_transfer_accounts();
+
+CREATE OR REPLACE FUNCTION public.preserve_transfer_account_currency()
+RETURNS trigger LANGUAGE plpgsql SET search_path = '' AS $$
+BEGIN
+  IF NEW.currency_id IS DISTINCT FROM OLD.currency_id AND EXISTS (
+    SELECT 1 FROM public.transactions WHERE user_id=NEW.user_id AND type='transfer' AND deleted_at IS NULL
+    AND (account_id=NEW.id OR destination_account_id=NEW.id)
+  ) THEN
+    RAISE EXCEPTION USING ERRCODE='23514', MESSAGE='An account with transfers cannot change currency';
+  END IF;
+  RETURN NEW;
+END;
+$$;
+REVOKE EXECUTE ON FUNCTION public.preserve_transfer_account_currency() FROM PUBLIC, anon, authenticated;
+CREATE TRIGGER preserve_transfer_currency BEFORE UPDATE OF currency_id ON public.accounts
+  FOR EACH ROW EXECUTE FUNCTION public.preserve_transfer_account_currency();
+COMMIT;

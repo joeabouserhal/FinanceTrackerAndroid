@@ -1,153 +1,104 @@
 package com.joeabouserhal.financetracker.ui.components
 
 import androidx.annotation.DrawableRes
-import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
-import androidx.compose.animation.expandVertically
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.interaction.collectIsPressedAsState
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.*
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.IntRect
+import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Popup
+import androidx.compose.ui.window.PopupPositionProvider
+import androidx.compose.ui.window.PopupProperties
+import androidx.compose.ui.platform.LocalDensity
 import com.joeabouserhal.financetracker.R
 import com.joeabouserhal.financetracker.theme.LocalThemeSpec
 
-/**
- * Structured floating add menu. The expanded state reads as one compact action
- * tray instead of a loose pile of unrelated buttons.
- */
+/** Compact menu anchored above a fixed-size add button. */
 @Composable
 fun ExpandableFab(
   onAddTransaction: () -> Unit,
   onAddFromPreset: () -> Unit,
   modifier: Modifier = Modifier,
+  onTransfer: () -> Unit = {},
 ) {
   var expanded by remember { mutableStateOf(false) }
-
-  Column(
-    modifier = modifier,
-    horizontalAlignment = Alignment.End,
-    verticalArrangement = Arrangement.spacedBy(7.dp),
-  ) {
-    AnimatedVisibility(
-      visible = expanded,
-      enter = expandVertically(tween(190), expandFrom = Alignment.Bottom) + fadeIn(tween(150)),
-      exit = shrinkVertically(tween(150), shrinkTowards = Alignment.Bottom) + fadeOut(tween(110)),
-    ) {
-      ActionTray(
-        onAddTransaction = {
-          expanded = false
-          onAddTransaction()
-        },
-        onAddFromPreset = {
-          expanded = false
-          onAddFromPreset()
-        },
+  val gap = with(LocalDensity.current) { 8.dp.roundToPx() }
+  val position = remember(gap) {
+    object : PopupPositionProvider {
+      override fun calculatePosition(
+        anchorBounds: IntRect,
+        windowSize: IntSize,
+        layoutDirection: LayoutDirection,
+        popupContentSize: IntSize,
+      ): IntOffset = IntOffset(
+        (anchorBounds.right - popupContentSize.width).coerceIn(gap, maxOf(gap, windowSize.width - popupContentSize.width - gap)),
+        (anchorBounds.top - popupContentSize.height - gap).coerceAtLeast(gap),
       )
     }
+  }
 
+  Box(modifier) {
     BrFab(
       onClick = { expanded = !expanded },
       expanded = expanded,
       contentDescription = if (expanded) "Close add menu" else "Open add menu",
     )
+    if (expanded) {
+      Popup(
+        popupPositionProvider = position,
+        onDismissRequest = { expanded = false },
+        properties = PopupProperties(focusable = true),
+      ) {
+        val progress = remember { Animatable(0f) }
+        LaunchedEffect(Unit) { progress.animateTo(1f, tween(150, easing = FastOutSlowInEasing)) }
+        Column(
+          Modifier.width(208.dp).graphicsLayer {
+            alpha = progress.value
+            translationY = (1f - progress.value) * gap
+          }.background(LocalThemeSpec.current.accent),
+        ) {
+          ActionRow(R.drawable.ic_transfer, "TRANSFER") { expanded = false; onTransfer() }
+          MenuDivider()
+          ActionRow(R.drawable.ic_tab_presets, "FROM PRESET") { expanded = false; onAddFromPreset() }
+          MenuDivider()
+          ActionRow(R.drawable.ic_tab_transactions, "TRANSACTION") { expanded = false; onAddTransaction() }
+        }
+      }
+    }
   }
 }
 
 @Composable
-private fun ActionTray(
-  onAddTransaction: () -> Unit,
-  onAddFromPreset: () -> Unit,
-) {
-  Column(
-    Modifier.width(244.dp),
-    verticalArrangement = Arrangement.spacedBy(7.dp),
-  ) {
-    ActionRow(
-      iconRes = R.drawable.ic_tab_presets,
-      title = "FROM PRESET",
-      detail = "REUSE SAVED DETAILS",
-      onClick = onAddFromPreset,
-    )
-    ActionRow(
-      iconRes = R.drawable.ic_tab_transactions,
-      title = "TRANSACTION",
-      detail = "START FROM SCRATCH",
-      onClick = onAddTransaction,
-    )
-  }
-}
-
-@Composable
-private fun ActionRow(
-  @DrawableRes iconRes: Int,
-  title: String,
-  detail: String,
-  onClick: () -> Unit,
-) {
+private fun MenuDivider() {
   val spec = LocalThemeSpec.current
-  val tone = spec.accent
-  val onTone = spec.onAccent
-  val interactionSource = remember { MutableInteractionSource() }
-  val pressed by interactionSource.collectIsPressedAsState()
+  Box(Modifier.fillMaxWidth().padding(horizontal = 14.dp).height(1.dp).background(spec.onAccent.copy(alpha = 0.16f)))
+}
+
+@Composable
+private fun ActionRow(@DrawableRes iconRes: Int, title: String, onClick: () -> Unit) {
+  val spec = LocalThemeSpec.current
   Row(
-    Modifier
-      .fillMaxWidth()
-      .background(if (pressed) tone.copy(alpha = 0.80f) else tone)
-      .border(spec.borderWidth, spec.border)
-      .clickable(
-        interactionSource = interactionSource,
-        indication = null,
-        onClick = onClick,
-      )
-      .padding(horizontal = 12.dp, vertical = 11.dp),
-    horizontalArrangement = Arrangement.spacedBy(11.dp),
+    Modifier.fillMaxWidth().clickable(role = Role.Button, onClick = onClick)
+      .heightIn(min = 56.dp).padding(horizontal = 14.dp, vertical = 16.dp),
+    horizontalArrangement = Arrangement.spacedBy(12.dp),
     verticalAlignment = Alignment.CenterVertically,
   ) {
-    Box(
-      Modifier.size(38.dp).background(onTone.copy(alpha = 0.12f)).border(spec.borderWidth, onTone.copy(alpha = 0.45f)),
-      contentAlignment = Alignment.Center,
-    ) {
-      Icon(
-        painter = painterResource(iconRes),
-        contentDescription = null,
-        tint = onTone,
-        modifier = Modifier.size(20.dp),
-      )
-    }
-    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-      Text(title, style = MaterialTheme.typography.labelMedium, color = onTone, fontWeight = FontWeight.Bold)
-      Text(detail, style = MaterialTheme.typography.labelSmall, color = onTone.copy(alpha = 0.72f))
-    }
-    Icon(
-      painter = painterResource(R.drawable.ic_chevron_right),
-      contentDescription = null,
-      tint = onTone.copy(alpha = 0.72f),
-      modifier = Modifier.size(18.dp),
-    )
+    Icon(painterResource(iconRes), contentDescription = null, tint = spec.onAccent, modifier = Modifier.size(20.dp))
+    Text(title, style = MaterialTheme.typography.labelLarge, color = spec.onAccent, modifier = Modifier.weight(1f))
   }
 }

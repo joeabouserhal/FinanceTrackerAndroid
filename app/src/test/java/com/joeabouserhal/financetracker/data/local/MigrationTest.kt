@@ -277,6 +277,7 @@ class MigrationTest {
         .addMigrations(Migrations.MIGRATION_11_12)
         .addMigrations(Migrations.MIGRATION_12_13)
         .addMigrations(Migrations.MIGRATION_13_14)
+        .addMigrations(Migrations.MIGRATION_14_15)
         .allowMainThreadQueries()
         .build()
       try {
@@ -284,7 +285,7 @@ class MigrationTest {
           assertTrue(it.moveToFirst())
           assertEquals("Guest", it.getString(0))
         }
-        assertEquals(14, room.openHelper.writableDatabase.version)
+        assertEquals(15, room.openHelper.writableDatabase.version)
         room.openHelper.writableDatabase.query("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='assistant_commands'").use {
           assertTrue(it.moveToFirst())
           assertEquals(0, it.getInt(0))
@@ -316,6 +317,32 @@ class MigrationTest {
     db.query("SELECT COUNT(*) FROM outbox WHERE owner_id='guest'").use { it.moveToFirst(); assertEquals(0, it.getInt(0)) }
     db.query("SELECT COUNT(*) FROM outbox WHERE owner_id='repair-user'").use { it.moveToFirst(); assertEquals(2, it.getInt(0)) }
     db.query("SELECT sync_version FROM currencies WHERE id='repair-cur'").use { it.moveToFirst(); assertEquals(version, it.getString(0)) }
+  }
+
+  @Test
+  fun `transfer migration preserves existing rows and Room validates all foreign keys`() {
+    val name = "transfer-${java.util.UUID.randomUUID()}.db"
+    try {
+      openVersion(14, name).use { old ->
+        old.execSQL("INSERT INTO currencies(id,owner_id,code,symbol,name,is_default,created_at,updated_at) VALUES('usd','guest','USD','$','Dollar',1,'2026-01-01','2026-01-01')")
+        old.execSQL("INSERT INTO accounts(id,owner_id,currency_id,name,archived,is_default,created_at,updated_at) VALUES('cash','guest','usd','Cash',0,1,'2026-01-01','2026-01-01')")
+        old.execSQL("INSERT INTO categories(id,owner_id,name,type,color,is_default,created_at,updated_at) VALUES('other','guest','Other','EXPENSE','#777777',1,'2026-01-01','2026-01-01')")
+        old.execSQL("INSERT INTO transactions(id,owner_id,type,amount,currency_id,category_id,account_id,date,created_at,updated_at,recurrence_occurrence_id) VALUES('legacy','guest','EXPENSE',100,'usd','other','cash','2026-01-01','2026-01-01','2026-01-02','occurrence')")
+      }
+      val room = Room.databaseBuilder(context, AppDatabase::class.java, name)
+        .addMigrations(Migrations.MIGRATION_14_15)
+        .setJournalMode(androidx.room.RoomDatabase.JournalMode.TRUNCATE)
+        .allowMainThreadQueries().build()
+      try {
+        val db = room.openHelper.writableDatabase
+        db.query("SELECT amount,category_id,created_at,recurrence_occurrence_id,destination_account_id FROM transactions WHERE id='legacy'").use {
+          assertTrue(it.moveToFirst()); assertEquals(100L, it.getLong(0)); assertEquals("other", it.getString(1))
+          assertEquals("2026-01-01", it.getString(2)); assertEquals("occurrence", it.getString(3)); assertNull(it.getString(4))
+        }
+        assertMatchesExportedSchema(db, 15)
+        db.query("PRAGMA foreign_key_check").use { assertTrue(!it.moveToFirst()) }
+      } finally { room.close() }
+    } finally { context.deleteDatabase(name) }
   }
 
   /** Approximates Room's MigrationTestHelper validation: columns, types, NOT NULL, PKs. */

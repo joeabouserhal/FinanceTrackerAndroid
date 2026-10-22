@@ -70,6 +70,7 @@ fun MainTabs(
   onOpenCompletedGoals: () -> Unit,
   onOpenAuth: () -> Unit,
   modifier: Modifier = Modifier,
+  onTransfer: () -> Unit = {},
 ) {
   var selectedTab by rememberSaveable { mutableStateOf(MainTab.DASHBOARD) }
 
@@ -92,12 +93,14 @@ fun MainTabs(
           when (tab) {
             MainTab.DASHBOARD ->
               DashboardScreen(
+                onTransfer = onTransfer,
                 onAddTransaction = onAddTransaction,
                 onAddFromPreset = onOpenPresetPicker,
                 onEditTransaction = onEditTransaction,
                 onSeeAllTransactions = { selectedTab = MainTab.TRANSACTIONS },
               )
             MainTab.TRANSACTIONS -> TransactionsScreen(
+              onTransfer = onTransfer,
               onAddTransaction = onAddTransaction,
               onAddFromPreset = onOpenPresetPicker,
               onEditTransaction = onEditTransaction,

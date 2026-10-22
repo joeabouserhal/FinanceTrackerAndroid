@@ -35,7 +35,7 @@ interface TransactionDao {
   @Query("SELECT * FROM transactions WHERE owner_id = :ownerId AND deleted_at IS NULL AND goal_id = :goalId")
   suspend fun getByGoal(ownerId: String, goalId: String): List<TransactionEntity>
 
-  @Query("SELECT COUNT(*) FROM transactions WHERE owner_id = :ownerId AND deleted_at IS NULL AND account_id = :accountId")
+  @Query("SELECT COUNT(*) FROM transactions WHERE owner_id = :ownerId AND deleted_at IS NULL AND (account_id = :accountId OR destination_account_id = :accountId)")
   suspend fun countByAccount(ownerId: String, accountId: String): Int
 
   @Insert(onConflict = OnConflictStrategy.REPLACE)

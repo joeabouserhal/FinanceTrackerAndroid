@@ -12,6 +12,8 @@ import kotlinx.serialization.Serializable
 /** Add a new transaction (optionally pre-filled from a preset). */
 @Serializable data class AddTransaction(val presetId: String? = null) : NavKey
 
+@Serializable data object AddTransfer : NavKey
+
 /** Preset picker for "add from preset" (pushed from the FAB menu). */
 @Serializable data object PresetPicker : NavKey
 

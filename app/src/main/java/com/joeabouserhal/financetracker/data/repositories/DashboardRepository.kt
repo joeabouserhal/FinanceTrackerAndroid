@@ -72,10 +72,7 @@ class DashboardRepository(
 
     // Single-pass per-account all-time nets (was O(accounts × transactions)
     // of full-list filters before this phase).
-    val netByAccount = HashMap<String, Long>()
-    for (t in allTransactions) {
-      t.accountId?.let { accountId -> netByAccount[accountId] = (netByAccount[accountId] ?: 0L) + signed(t) }
-    }
+    val netByAccount = accountBalanceMap(allTransactions)
     val accountBalances =
       accounts.mapNotNull { account ->
         val currency = currencyById[account.currencyId] ?: return@mapNotNull null
@@ -99,6 +96,7 @@ class DashboardRepository(
     val incomeByCurrency = HashMap<String, Long>()
     val expenseByCurrency = HashMap<String, Long>()
     for (t in monthTransactions) {
+      if (t.type == TransactionType.TRANSFER) continue
       val map = if (t.type == TransactionType.INCOME) incomeByCurrency else expenseByCurrency
       map[t.currencyId] = (map[t.currencyId] ?: 0L) + t.amount
     }
@@ -115,5 +113,4 @@ class DashboardRepository(
     return DashboardData(balances, monthly, recent)
   }
 
-  private fun signed(t: TransactionEntity): Long = if (t.type == TransactionType.INCOME) t.amount else -t.amount
 }

@@ -52,6 +52,9 @@ class AccountRepository(
     require(name.trim().isNotBlank()) { "Account name is required" }
     db.withTransaction {
       val target = dao.getById(ownerId, id)
+      require(target == null || target.currencyId == currencyId || transactionDao.countByAccount(ownerId, id) == 0) {
+        "An account with transactions cannot change currency"
+      }
       val now = java.time.Instant.now().toString()
       dao.update(ownerId, id, name.trim(), currencyId, now)
       // Keep the one-default-per-currency invariant when moving currencies,

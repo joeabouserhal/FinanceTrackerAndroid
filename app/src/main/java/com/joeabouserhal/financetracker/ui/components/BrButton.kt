@@ -22,6 +22,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -52,12 +54,13 @@ fun BrButton(
   minHeight: androidx.compose.ui.unit.Dp? = null,
 ) {
   val spec = LocalThemeSpec.current
+  val modal = LocalModalStyle.current
   val (face, contentColor) =
     when (style) {
       BrButtonStyle.SOLID -> spec.accent to spec.onAccent
-      BrButtonStyle.OUTLINE -> spec.surface to spec.ink
+      BrButtonStyle.OUTLINE -> (if (modal) Color.Transparent else spec.surface) to spec.ink
       BrButtonStyle.INK -> spec.ink to spec.background
-      BrButtonStyle.DANGER -> spec.background to spec.expense
+      BrButtonStyle.DANGER -> if (modal) spec.expense to spec.surface else spec.background to spec.expense
     }
   val borderColor =
     when (style) {
@@ -81,11 +84,12 @@ fun BrButton(
             else -> face
           },
         )
-        .border(spec.borderWidth, if (enabled) borderColor else spec.muted)
+        .then(if (modal) Modifier else Modifier.border(spec.borderWidth, if (enabled) borderColor else spec.muted))
         .clickable(
           interactionSource = interactionSource,
           indication = null,
           enabled = enabled,
+          role = Role.Button,
           onClick = onClick,
         )
         .padding(

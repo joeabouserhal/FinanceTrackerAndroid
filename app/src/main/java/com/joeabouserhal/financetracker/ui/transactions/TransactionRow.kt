@@ -16,17 +16,20 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.joeabouserhal.financetracker.R
 import com.joeabouserhal.financetracker.data.local.entities.TransactionType
 import com.joeabouserhal.financetracker.data.repositories.TransactionListItem
 import com.joeabouserhal.financetracker.theme.LocalThemeSpec
@@ -45,13 +48,14 @@ fun TransactionRow(
   val spec = LocalThemeSpec.current
   val tx = item.transaction
   val isGoal = tx.type == TransactionType.GOAL
-  val signed = if (tx.type == TransactionType.INCOME) tx.amount else -tx.amount
+  val isTransfer = tx.type == TransactionType.TRANSFER
   val amountColor by animateColorAsState(
     targetValue =
       when (tx.type) {
         TransactionType.INCOME -> spec.income
         TransactionType.GOAL -> spec.goal
         TransactionType.EXPENSE -> spec.expense
+        TransactionType.TRANSFER -> spec.transfer
       },
     animationSpec = tween(200),
     label = "amountColor",
@@ -70,7 +74,7 @@ fun TransactionRow(
       Modifier
         .width(3.dp)
         .height(40.dp)
-        .background(if (isGoal) spec.goal else parseColor(item.categoryColor)),
+        .background(if (isTransfer) spec.transfer else if (isGoal) spec.goal else parseColor(item.categoryColor)),
     )
     Column(
       Modifier
@@ -85,25 +89,32 @@ fun TransactionRow(
         maxLines = 1,
         overflow = TextOverflow.Ellipsis,
       )
-      val meta =
+      val meta = if (isTransfer) "Transfer · ${item.accountName ?: "Unavailable account"} → ${item.destinationAccountName ?: "Unavailable account"}" else
         listOfNotNull(
           if (isGoal) "Goal" else item.categoryName.takeIf { tx.title != null },
           item.accountName,
         ).joinToString(" · ")
       if (meta.isNotBlank()) {
-        Text(meta, style = MaterialTheme.typography.labelSmall, color = spec.muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Text(meta, style = MaterialTheme.typography.labelSmall, color = spec.muted,
+          maxLines = if (isTransfer) 2 else 1, overflow = TextOverflow.Ellipsis)
       }
     }
     Column(horizontalAlignment = Alignment.End) {
-      Text(
-        text = compactCurrencyText(
-          kotlin.math.abs(signed),
-          item.currencySymbol,
-          prefix = if (tx.type == TransactionType.INCOME) "+" else "-",
-        ),
-        style = MaterialTheme.typography.labelLarge,
-        color = amountColor,
-      )
+      Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        if (isTransfer) {
+          Icon(painterResource(R.drawable.ic_transfer), contentDescription = "Transfer",
+            tint = amountColor, modifier = Modifier.size(18.dp))
+        }
+        Text(
+          text = compactCurrencyText(
+            tx.amount,
+            item.currencySymbol,
+            prefix = if (isTransfer) "" else if (tx.type == TransactionType.INCOME) "+" else "-",
+          ),
+          style = MaterialTheme.typography.labelLarge,
+          color = amountColor,
+        )
+      }
       Text(tx.date, style = MaterialTheme.typography.labelSmall, color = spec.muted)
     }
   }

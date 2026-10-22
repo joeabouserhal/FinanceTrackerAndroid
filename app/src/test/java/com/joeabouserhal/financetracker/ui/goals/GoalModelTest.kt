@@ -25,6 +25,13 @@ class GoalModelTest {
     assertTrue(progress.last().scopeLabel.contains("archived"))
   }
 
+  @Test fun transfersAffectAccountGoalsWithoutChangingCurrencyProgress() {
+    val rows = listOf(tx("income", 20000, TransactionType.INCOME, "cash"),
+      tx("move", 5000, TransactionType.TRANSFER, "cash").copy(categoryId = null, destinationAccountId = "bank"))
+    val result = buildProgress(listOf(goal(), goal("cash"), goal("bank")), rows, listOf(currency), accounts)
+    assertEquals(listOf(20000L, 15000L, 5000L), result.map { it.progressMinor })
+  }
+
   @Test fun unassignedTransactionsCountOnlyTowardWholeCurrency() {
     val rows = listOf(tx("income", 5000, TransactionType.INCOME, null))
     assertEquals(listOf(5000L, 0L), buildProgress(listOf(goal(), goal("bank")), rows, listOf(currency), accounts).map { it.progressMinor })

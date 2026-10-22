@@ -115,7 +115,7 @@ private fun categoryReports(transactions: List<TransactionListItem>, total: Long
   transactions.groupBy { it.transaction.categoryId }.map { (categoryId, group) ->
     val amount = group.sumOf { it.transaction.amount }
     CategoryReport(
-      categoryId,
+      requireNotNull(categoryId),
       group.first().categoryName,
       group.first().categoryColor,
       amount,

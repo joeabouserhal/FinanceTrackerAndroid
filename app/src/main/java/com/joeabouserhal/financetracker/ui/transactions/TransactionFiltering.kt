@@ -3,7 +3,7 @@ package com.joeabouserhal.financetracker.ui.transactions
 import com.joeabouserhal.financetracker.data.local.entities.TransactionType
 import com.joeabouserhal.financetracker.data.repositories.TransactionListItem
 
-enum class TypeFilter(val label: String) { ALL("All"), INCOME("Income"), EXPENSE("Expense") }
+enum class TypeFilter(val label: String) { ALL("All"), INCOME("Income"), EXPENSE("Expense"), TRANSFER("Transfer") }
 
 enum class SortOrder(val label: String) { NEWEST("Newest"), OLDEST("Oldest"), LARGEST("Largest"), SMALLEST("Smallest") }
 
@@ -58,17 +58,20 @@ object TransactionFiltering {
             TypeFilter.INCOME -> tx.type == TransactionType.INCOME
             // Goal withdrawals are money out of an account, so EXPENSE includes them.
             TypeFilter.EXPENSE -> tx.type == TransactionType.EXPENSE || tx.type == TransactionType.GOAL
+            TypeFilter.TRANSFER -> tx.type == TransactionType.TRANSFER
           }
         typeMatches &&
           (f.categoryIds.isEmpty() || tx.categoryId in f.categoryIds) &&
-          (f.accountIds.isEmpty() || tx.accountId in f.accountIds) &&
+          (f.accountIds.isEmpty() || tx.accountId in f.accountIds || tx.destinationAccountId in f.accountIds) &&
           (f.currencyIds.isEmpty() || tx.currencyId in f.currencyIds) &&
           (f.dateFrom == null || tx.date >= f.dateFrom) &&
           (f.dateTo == null || tx.date <= f.dateTo) &&
           (f.search.isBlank() ||
             tx.title?.contains(f.search, ignoreCase = true) == true ||
             tx.notes?.contains(f.search, ignoreCase = true) == true ||
-            item.categoryName.contains(f.search, ignoreCase = true))
+            item.categoryName.contains(f.search, ignoreCase = true) ||
+            item.accountName?.contains(f.search, ignoreCase = true) == true ||
+            item.destinationAccountName?.contains(f.search, ignoreCase = true) == true)
       }
       .sortedWith(sortComparator(f.sort))
       .toList()

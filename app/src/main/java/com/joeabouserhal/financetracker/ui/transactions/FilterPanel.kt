@@ -18,11 +18,9 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.material3.DateRangePicker
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.material3.rememberDateRangePickerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -44,10 +42,8 @@ import com.joeabouserhal.financetracker.ui.components.BrTextField
 import com.joeabouserhal.financetracker.ui.rememberAppContainer
 import com.joeabouserhal.financetracker.utils.Dates
 import com.joeabouserhal.financetracker.utils.parseHexColor
-import java.time.Instant
 import java.time.LocalDate
 import java.time.YearMonth
-import java.time.ZoneOffset
 import kotlinx.coroutines.flow.combine
 
 /** Saveable filter state shared by the Transactions and Report pages. */
@@ -125,6 +121,7 @@ fun FilterPanel(
         TypeFilter.ALL -> true
         TypeFilter.INCOME -> c.type == TransactionType.INCOME
         TypeFilter.EXPENSE -> c.type == TransactionType.EXPENSE
+        TypeFilter.TRANSFER -> false
       }
     }
 
@@ -279,7 +276,7 @@ fun FilterPanel(
       }
 
       val selectedCategoryNames = visibleCategories.filter { it.id in filters.categoryIds }.map { it.name }
-      ChipRow("CATEGORY", selectedCategoryNames.takeIf { it.isNotEmpty() }?.joinToString(" · ")) {
+      if (effectiveType != TypeFilter.TRANSFER) ChipRow("CATEGORY", selectedCategoryNames.takeIf { it.isNotEmpty() }?.joinToString(" · ")) {
         BrChip("ALL", selected = filters.categoryIds.isEmpty(), comfortable = true, onClick = { onFiltersChange(filters.copy(categoryIds = emptySet())) })
         BrChip(
           "CUSTOM",
@@ -312,21 +309,25 @@ fun FilterPanel(
 
   // Custom date RANGE picker.
   if (showRangePicker) {
-    val rangeState = rememberDateRangePickerState()
+    var rangeStart by remember { mutableStateOf<LocalDate?>(null) }
+    var rangeEnd by remember { mutableStateOf<LocalDate?>(null) }
     BrDialog(
       title = "Choose date range",
       onDismiss = { showRangePicker = false },
       confirmText = "Apply",
-      confirmEnabled = rangeState.selectedStartDateMillis != null && rangeState.selectedEndDateMillis != null,
+      confirmEnabled = rangeStart != null && rangeEnd != null,
       onConfirm = {
-        val from = rangeState.selectedStartDateMillis?.let { Instant.ofEpochMilli(it).atZone(ZoneOffset.UTC).toLocalDate().toString() }
-        val to = rangeState.selectedEndDateMillis?.let { Instant.ofEpochMilli(it).atZone(ZoneOffset.UTC).toLocalDate().toString() }
+        val from = rangeStart?.toString()
+        val to = rangeEnd?.toString()
         if (from != null && to != null) onFiltersChange(filters.copy(dateFrom = from, dateTo = to))
         showRangePicker = false
       },
       wide = true,
+      scrollContent = true,
     ) {
-      DateRangePicker(state = rangeState, modifier = Modifier.fillMaxWidth().heightIn(max = 520.dp))
+      com.joeabouserhal.financetracker.ui.components.BrDateRangePicker(rangeStart, rangeEnd) { start, end ->
+        rangeStart = start; rangeEnd = end
+      }
     }
   }
 
@@ -355,7 +356,6 @@ fun FilterPanel(
               Row(
                 Modifier
                   .fillMaxWidth()
-                  .background(if (selected) spec.surfaceAlt else spec.surface)
                   .clickable {
                     onFiltersChange(filters.copy(categoryIds = toggle(filters.categoryIds, c.id)))
                   }
@@ -364,7 +364,7 @@ fun FilterPanel(
               ) {
                 Box(Modifier.size(10.dp).background(parseCategoryColor(c.color)))
                 Spacer(Modifier.width(8.dp))
-                Text(c.name, style = MaterialTheme.typography.bodyMedium, color = spec.ink, modifier = Modifier.weight(1f))
+                Text(c.name, style = MaterialTheme.typography.bodyMedium, color = if (selected) spec.accent else spec.ink, modifier = Modifier.weight(1f))
                 Text(if (selected) "✓" else "", style = MaterialTheme.typography.labelLarge, color = spec.accent)
               }
             }
@@ -405,12 +405,11 @@ fun FilterPanel(
               Row(
                 Modifier
                   .fillMaxWidth()
-                  .background(if (selected) spec.surfaceAlt else spec.surface)
                   .clickable { onFiltersChange(filters.copy(accountIds = toggle(filters.accountIds, a.id))) }
                   .padding(horizontal = 10.dp, vertical = 9.dp),
                 verticalAlignment = Alignment.CenterVertically,
               ) {
-                Text(a.name, style = MaterialTheme.typography.bodyMedium, color = spec.ink, modifier = Modifier.weight(1f))
+                Text(a.name, style = MaterialTheme.typography.bodyMedium, color = if (selected) spec.accent else spec.ink, modifier = Modifier.weight(1f))
                 if (suffix != null) {
                   Text(
                     "(${suffix.uppercase()})",

@@ -130,6 +130,7 @@ fun MainNavigation(
           }
           entry<Main> {
             MainTabs(
+              onTransfer = { backStack.add(AddTransfer) },
               onAddTransaction = { backStack.add(AddTransaction(presetId = null)) },
               onOpenPresetPicker = { backStack.add(PresetPicker) },
               onEditTransaction = { transactionId -> backStack.add(EditTransaction(transactionId)) },
@@ -165,6 +166,13 @@ fun MainNavigation(
                   backStack.removeLastOrNull()
                 }
               },
+            )
+          }
+          entry<AddTransfer> {
+            TransactionFormScreen(
+              transactionId = null, transferMode = true,
+              onBack = { backStack.removeLastOrNull() },
+              onSaved = { backStack.removeLastOrNull() },
             )
           }
           entry<PresetPicker> {

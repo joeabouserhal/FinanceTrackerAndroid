@@ -1,20 +1,26 @@
 package com.joeabouserhal.financetracker.data.recurring
 
-import android.app.DatePickerDialog
-import android.app.TimePickerDialog
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
-import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.*
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
 import com.joeabouserhal.financetracker.theme.FinanceTrackerTheme
 import com.joeabouserhal.financetracker.ui.components.BrButton
 import com.joeabouserhal.financetracker.ui.components.BrButtonStyle
 import com.joeabouserhal.financetracker.ui.components.BrDialog
+import com.joeabouserhal.financetracker.ui.components.BrDatePickerDialog
+import com.joeabouserhal.financetracker.ui.components.BrTimePickerDialog
 import java.time.Instant
 import java.time.LocalDateTime
+import java.time.LocalDate
+import java.time.LocalTime
 import java.time.ZoneId
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
@@ -27,6 +33,8 @@ class SnoozeRecurringActivity : ComponentActivity() {
     setContent {
       val app = application as com.joeabouserhal.financetracker.FinanceTrackerApplication
       val scope = rememberCoroutineScope()
+      var showDatePicker by remember { mutableStateOf(false) }
+      var chosenDate by remember { mutableStateOf<LocalDate?>(null) }
       fun snooze(until: Instant) = scope.launch {
         val owner = app.container.sessionManager.session.first().ownerId
         app.container.recurringRepository.snooze(owner, occurrenceId, until)
@@ -37,7 +45,7 @@ class SnoozeRecurringActivity : ComponentActivity() {
       FinanceTrackerTheme {
         Surface(color = MaterialTheme.colorScheme.background) {
           BrDialog(title = "SNOOZE TRANSACTION", onDismiss = ::finish, dismissText = null) {
-            Column {
+            Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
               BrButton("1 HOUR", { snooze(Instant.now().plusSeconds(3600)) }, style = BrButtonStyle.SOLID)
               BrButton("TOMORROW", {
                 scope.launch {
@@ -52,14 +60,18 @@ class SnoozeRecurringActivity : ComponentActivity() {
                 }
               }, style = BrButtonStyle.OUTLINE)
               BrButton("CHOOSE DATE & TIME", {
-                val now = LocalDateTime.now()
-                DatePickerDialog(this@SnoozeRecurringActivity, { _, year, month, day ->
-                  TimePickerDialog(this@SnoozeRecurringActivity, { _, hour, minute ->
-                    snooze(LocalDateTime.of(year, month + 1, day, hour, minute).atZone(ZoneId.systemDefault()).toInstant())
-                  }, now.hour, now.minute, false).show()
-                }, now.year, now.monthValue - 1, now.dayOfMonth).show()
+                showDatePicker = true
               }, style = BrButtonStyle.OUTLINE)
             }
+          }
+          if (showDatePicker) BrDatePickerDialog("Snooze until", LocalDate.now(), minimumDate = LocalDate.now(),
+            onDismiss = { showDatePicker = false }, onSelect = { chosenDate = it; showDatePicker = false })
+          chosenDate?.let { date ->
+            val now = LocalTime.now()
+            BrTimePickerDialog(now.hour * 60 + now.minute, onDismiss = { chosenDate = null }, onSelect = { minutes ->
+              snooze(date.atTime(minutes / 60, minutes % 60).atZone(ZoneId.systemDefault()).toInstant())
+              chosenDate = null
+            })
           }
         }
       }

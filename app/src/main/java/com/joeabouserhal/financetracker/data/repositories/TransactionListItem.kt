@@ -4,6 +4,7 @@ import com.joeabouserhal.financetracker.data.local.entities.AccountEntity
 import com.joeabouserhal.financetracker.data.local.entities.CategoryEntity
 import com.joeabouserhal.financetracker.data.local.entities.CurrencyEntity
 import com.joeabouserhal.financetracker.data.local.entities.TransactionEntity
+import com.joeabouserhal.financetracker.data.local.entities.TransactionType
 
 /** A transaction enriched with the display fields the row needs. */
 data class TransactionListItem(
@@ -12,6 +13,7 @@ data class TransactionListItem(
   val categoryColor: String,
   val currencySymbol: String,
   val accountName: String?,
+  val destinationAccountName: String? = null,
 )
 
 fun enrichTransactions(
@@ -26,10 +28,11 @@ fun enrichTransactions(
   return transactions.map { tx ->
     TransactionListItem(
       transaction = tx,
-      categoryName = categoryById[tx.categoryId]?.name ?: "Other",
+      categoryName = if (tx.type == TransactionType.TRANSFER) "Transfer" else categoryById[tx.categoryId]?.name ?: "Other",
       categoryColor = categoryById[tx.categoryId]?.color ?: "#77746C",
       currencySymbol = currencyById[tx.currencyId]?.symbol ?: "",
       accountName = tx.accountId?.let { accountById[it]?.name },
+      destinationAccountName = tx.destinationAccountId?.let { accountById[it]?.name },
     )
   }
 }

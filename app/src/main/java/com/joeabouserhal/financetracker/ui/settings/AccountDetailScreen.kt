@@ -19,6 +19,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.joeabouserhal.financetracker.data.local.entities.TransactionType
 import com.joeabouserhal.financetracker.data.repositories.enrichTransactions
+import com.joeabouserhal.financetracker.data.repositories.amountForAccount
 import com.joeabouserhal.financetracker.data.session.Session
 import com.joeabouserhal.financetracker.theme.LocalThemeSpec
 import com.joeabouserhal.financetracker.ui.rememberAppContainer
@@ -63,8 +64,8 @@ fun AccountDetailScreen(
         val expenseCategories = rest[3] as List<com.joeabouserhal.financetracker.data.local.entities.CategoryEntity>
         val account = (active + archived).firstOrNull { it.id == accountId }
         val currency = account?.let { a -> currencies.firstOrNull { it.id == a.currencyId } }
-        val accountTxs = transactions.filter { it.accountId == accountId }
-        val balance = accountTxs.sumOf { if (it.type == TransactionType.INCOME) it.amount else -it.amount }
+        val accountTxs = transactions.filter { it.accountId == accountId || it.destinationAccountId == accountId }
+        val balance = accountTxs.sumOf { it.amountForAccount(accountId) }
         val (from, to) = Dates.monthBounds(YearMonth.now())
         val monthIncome = accountTxs.filter { it.date >= from && it.date <= to && it.type == TransactionType.INCOME }.sumOf { it.amount }
         val monthExpense = accountTxs.filter { it.date >= from && it.date <= to && (it.type == TransactionType.EXPENSE || it.type == TransactionType.GOAL) }.sumOf { it.amount }

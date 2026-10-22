@@ -7,11 +7,9 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -55,6 +53,8 @@ import com.joeabouserhal.financetracker.ui.components.BrChip
 import com.joeabouserhal.financetracker.ui.components.BrButton
 import com.joeabouserhal.financetracker.ui.components.BrButtonStyle
 import com.joeabouserhal.financetracker.ui.components.BrDialog
+import com.joeabouserhal.financetracker.ui.components.BrDatePickerDialog
+import com.joeabouserhal.financetracker.ui.components.BrTimePickerDialog
 import com.joeabouserhal.financetracker.ui.components.BrSegmentedToggle
 import com.joeabouserhal.financetracker.ui.components.BrTextField
 import com.joeabouserhal.financetracker.ui.rememberAppContainer
@@ -63,9 +63,6 @@ import com.joeabouserhal.financetracker.utils.parseHexColor
 import java.math.BigDecimal
 import java.math.RoundingMode
 import java.time.LocalDate
-import java.time.YearMonth
-import java.time.format.DateTimeFormatter
-import java.util.Locale
 import kotlinx.coroutines.launch
 
 /** Presets page filter: one type or everything. */
@@ -456,7 +453,6 @@ internal fun PresetDialog(
               Row(
                 Modifier
                   .fillMaxWidth()
-                  .background(if (categoryId == category.id) spec.surfaceAlt else spec.surface)
                   .clickable {
                     categoryId = category.id
                     showCategoryModal = false
@@ -484,7 +480,7 @@ internal fun PresetDialog(
   }
 
   when (pickerTarget) {
-    RecurringPickerTarget.START_DATE -> RecurringDatePickerDialog(
+    RecurringPickerTarget.START_DATE -> BrDatePickerDialog(
       title = "Start date",
       initialDate = LocalDate.parse(startDateText),
       onDismiss = { pickerTarget = null },
@@ -495,7 +491,7 @@ internal fun PresetDialog(
         pickerTarget = null
       },
     )
-    RecurringPickerTarget.END_DATE -> RecurringDatePickerDialog(
+    RecurringPickerTarget.END_DATE -> BrDatePickerDialog(
       title = "End date",
       initialDate = endDateText.takeIf { it.isNotBlank() }?.let(LocalDate::parse) ?: LocalDate.parse(startDateText),
       minimumDate = LocalDate.parse(startDateText),
@@ -505,7 +501,7 @@ internal fun PresetDialog(
         pickerTarget = null
       },
     )
-    RecurringPickerTarget.TIME -> RecurringTimePickerDialog(
+    RecurringPickerTarget.TIME -> BrTimePickerDialog(
       initialMinutes = timeText.split(':').let { parts ->
         ((parts.getOrNull(0)?.toIntOrNull() ?: 9) * 60 + (parts.getOrNull(1)?.toIntOrNull() ?: 0)).coerceIn(0, 1439)
       },
@@ -536,189 +532,11 @@ private fun RecurringPickerField(
     Box(
       Modifier
         .fillMaxWidth()
-        .background(spec.surfaceAlt)
-        .border(1.dp, spec.border)
         .clickable(onClick = onClick)
         .padding(horizontal = 10.dp, vertical = 11.dp),
     ) {
       Text(value, style = MaterialTheme.typography.labelMedium, color = spec.ink)
     }
-  }
-}
-
-/** A quiet calendar surface that shares the app's flat, compact visual language. */
-@Composable
-private fun RecurringDatePickerDialog(
-  title: String,
-  initialDate: LocalDate,
-  minimumDate: LocalDate? = null,
-  onDismiss: () -> Unit,
-  onSelect: (LocalDate) -> Unit,
-) {
-  val spec = LocalThemeSpec.current
-  var displayedMonth by remember(initialDate) { mutableStateOf(YearMonth.from(initialDate)) }
-  var selectedDate by remember(initialDate) { mutableStateOf(initialDate) }
-  val monthLabel = remember(displayedMonth) {
-    displayedMonth.atDay(1).format(DateTimeFormatter.ofPattern("MMMM yyyy", Locale.getDefault()))
-  }
-  val leadingDays = displayedMonth.atDay(1).dayOfWeek.value - 1
-  val slots = List(leadingDays) { null } + (1..displayedMonth.lengthOfMonth()).map { displayedMonth.atDay(it) }
-
-  BrDialog(
-    title = title,
-    onDismiss = onDismiss,
-    confirmText = "APPLY",
-    onConfirm = { onSelect(selectedDate) },
-    wide = true,
-  ) {
-    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-      Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        CalendarMonthButton("‹") { displayedMonth = displayedMonth.minusMonths(1) }
-        Text(
-          monthLabel.uppercase(),
-          style = MaterialTheme.typography.titleMedium,
-          color = spec.ink,
-          modifier = Modifier.weight(1f).padding(horizontal = 10.dp),
-        )
-        CalendarMonthButton("›") { displayedMonth = displayedMonth.plusMonths(1) }
-      }
-      BrChip("TODAY", selected = selectedDate == LocalDate.now(), onClick = {
-        selectedDate = LocalDate.now().coerceAtLeast(minimumDate ?: LocalDate.MIN)
-        displayedMonth = YearMonth.from(selectedDate)
-      })
-      Box(Modifier.fillMaxWidth().height(1.dp).background(spec.border.copy(alpha = 0.42f)))
-      Row(Modifier.fillMaxWidth()) {
-        listOf("M", "T", "W", "T", "F", "S", "S").forEach { day ->
-          Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
-            Text(day, style = MaterialTheme.typography.labelSmall, color = spec.muted)
-          }
-        }
-      }
-      slots.chunked(7).forEach { week ->
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-          repeat(7) { index ->
-            val date = week.getOrNull(index)
-            val selected = date == selectedDate
-            val enabled = date != null && (minimumDate == null || !date.isBefore(minimumDate))
-            Box(
-              Modifier
-                .weight(1f)
-                .aspectRatio(1.08f)
-                .background(if (selected) spec.accent else androidx.compose.ui.graphics.Color.Transparent)
-                .clickable(enabled = enabled) { selectedDate = date!! },
-              contentAlignment = Alignment.Center,
-            ) {
-              date?.let {
-                Text(
-                  it.dayOfMonth.toString(),
-                  style = MaterialTheme.typography.labelMedium,
-                  color = when {
-                    selected -> spec.onAccent
-                    enabled -> spec.ink
-                    else -> spec.muted.copy(alpha = 0.42f)
-                  },
-                )
-                if (it == LocalDate.now() && !selected) {
-                  Box(
-                    Modifier
-                      .align(Alignment.BottomCenter)
-                      .padding(bottom = 4.dp)
-                      .size(width = 4.dp, height = 2.dp)
-                      .background(spec.accent),
-                  )
-                }
-              }
-            }
-          }
-        }
-      }
-      Text("SELECTED · $selectedDate", style = MaterialTheme.typography.labelSmall, color = spec.accent)
-    }
-  }
-}
-
-@Composable
-private fun CalendarMonthButton(label: String, onClick: () -> Unit) {
-  val spec = LocalThemeSpec.current
-  Box(
-    Modifier.size(38.dp).clickable(onClick = onClick),
-    contentAlignment = Alignment.Center,
-  ) {
-    Text(label, style = MaterialTheme.typography.titleLarge, color = spec.ink)
-  }
-}
-
-/** Two precise number wheels provide a compact, themed alternative to the platform clock dialog. */
-@Composable
-private fun RecurringTimePickerDialog(
-  initialMinutes: Int,
-  onDismiss: () -> Unit,
-  onSelect: (Int) -> Unit,
-) {
-  val spec = LocalThemeSpec.current
-  var hour by remember(initialMinutes) { mutableStateOf(initialMinutes / 60) }
-  var minute by remember(initialMinutes) { mutableStateOf(initialMinutes % 60) }
-  BrDialog(
-    title = "Reminder time",
-    onDismiss = onDismiss,
-    confirmText = "APPLY",
-    onConfirm = { onSelect(hour * 60 + minute) },
-  ) {
-    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-      Text("%02d:%02d".format(hour, minute), style = MaterialTheme.typography.headlineMedium, color = spec.accent)
-      Text("TAP + OR − TO SET AN EXACT TIME", style = MaterialTheme.typography.labelSmall, color = spec.muted)
-      Row(
-        Modifier.fillMaxWidth().border(1.dp, spec.border),
-        verticalAlignment = Alignment.CenterVertically,
-      ) {
-        RecurringTimeWheel(
-          label = "HOUR",
-          value = hour,
-          range = 0..23,
-          modifier = Modifier.weight(1f),
-          onValueChange = { hour = it },
-        )
-        Box(Modifier.size(width = 1.dp, height = 132.dp).background(spec.border.copy(alpha = 0.55f)))
-        RecurringTimeWheel(
-          label = "MINUTE",
-          value = minute,
-          range = 0..59,
-          modifier = Modifier.weight(1f),
-          onValueChange = { minute = it },
-        )
-      }
-    }
-  }
-}
-
-@Composable
-private fun RecurringTimeWheel(
-  label: String,
-  value: Int,
-  range: IntRange,
-  modifier: Modifier = Modifier,
-  onValueChange: (Int) -> Unit,
-) {
-  val spec = LocalThemeSpec.current
-  fun wrap(candidate: Int): Int = when {
-    candidate > range.last -> range.first
-    candidate < range.first -> range.last
-    else -> candidate
-  }
-  Column(modifier, horizontalAlignment = Alignment.CenterHorizontally) {
-    Text(label, style = MaterialTheme.typography.labelSmall, color = spec.muted, modifier = Modifier.padding(top = 10.dp))
-    Text(
-      "+",
-      style = MaterialTheme.typography.titleLarge,
-      color = spec.ink,
-      modifier = Modifier.minimumInteractiveComponentSize().clickable { onValueChange(wrap(value + 1)) },
-    )
-    Text("%02d".format(value), style = MaterialTheme.typography.headlineMedium, color = spec.accent)
-    Text(
-      "−",
-      style = MaterialTheme.typography.titleLarge,
-      color = spec.ink,
-      modifier = Modifier.minimumInteractiveComponentSize().clickable { onValueChange(wrap(value - 1)) },
-    )
+    Box(Modifier.fillMaxWidth().height(1.dp).background(spec.border))
   }
 }

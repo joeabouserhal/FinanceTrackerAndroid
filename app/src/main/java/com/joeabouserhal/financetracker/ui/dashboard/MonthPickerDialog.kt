@@ -1,7 +1,6 @@
 package com.joeabouserhal.financetracker.ui.dashboard
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -10,7 +9,6 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.MaterialTheme
@@ -22,6 +20,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.joeabouserhal.financetracker.theme.LocalThemeSpec
@@ -57,8 +56,7 @@ fun MonthPickerDialog(
           val selected = year == y
           Box(
             Modifier
-              .background(if (selected) spec.accent else spec.surfaceAlt)
-              .border(1.dp, if (selected) spec.accent else spec.border)
+              .background(if (selected) spec.accent else Color.Transparent)
               .clickable { year = y }
               .padding(horizontal = 16.dp, vertical = 8.dp),
             contentAlignment = Alignment.Center,
@@ -72,8 +70,6 @@ fun MonthPickerDialog(
           }
         }
       }
-
-      Box(Modifier.fillMaxWidth().height(1.dp).background(spec.border.copy(alpha = 0.4f)))
 
       // ----------------------------------------------------------------- MONTH
       Text("MONTH", style = MaterialTheme.typography.labelSmall, color = spec.muted)
@@ -90,17 +86,8 @@ fun MonthPickerDialog(
                 .background(
                   when {
                     selected -> spec.accent
-                    enabled -> spec.surfaceAlt
-                    else -> spec.surfaceAlt.copy(alpha = 0.5f)
+                    else -> Color.Transparent
                   }
-                )
-                .border(
-                  1.dp,
-                  when {
-                    selected -> spec.accent
-                    enabled -> spec.border
-                    else -> spec.border.copy(alpha = 0.35f)
-                  },
                 )
                 .clickable(enabled = enabled) { onSelect(YearMonth.of(year, monthValue)) },
               contentAlignment = Alignment.Center,

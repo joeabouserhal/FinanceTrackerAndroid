@@ -36,12 +36,10 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.DatePicker
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
-import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -84,9 +82,7 @@ import com.joeabouserhal.financetracker.utils.Dates
 import com.joeabouserhal.financetracker.utils.Money
 import java.math.BigDecimal
 import java.math.RoundingMode
-import java.time.Instant
 import java.time.LocalDate
-import java.time.ZoneOffset
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
@@ -97,6 +93,7 @@ fun TransactionFormScreen(
   onBack: () -> Unit,
   onSaved: () -> Unit,
   modifier: Modifier = Modifier,
+  transferMode: Boolean = false,
 ) {
   val container = rememberAppContainer()
   val scope = rememberCoroutineScope()
@@ -106,13 +103,15 @@ fun TransactionFormScreen(
 
   val currencies by remember(ownerId) { container.currencyRepository.observeAll(ownerId) }
     .collectAsStateWithLifecycle(initialValue = emptyList())
-  val accounts by remember(ownerId) { container.accountRepository.observeActive(ownerId) }
+  val accounts by remember(ownerId) { container.accountRepository.observeAll(ownerId) }
     .collectAsStateWithLifecycle(initialValue = emptyList())
 
-  var type by rememberSaveable { mutableStateOf(TransactionType.EXPENSE) }
+  var type by rememberSaveable { mutableStateOf(if (transferMode) TransactionType.TRANSFER else TransactionType.EXPENSE) }
   var amountText by rememberSaveable { mutableStateOf("") }
   var selectedCurrencyId by rememberSaveable { mutableStateOf<String?>(null) }
   var selectedAccountId by rememberSaveable { mutableStateOf<String?>(null) }
+  var destinationAccountId by rememberSaveable { mutableStateOf<String?>(null) }
+  var saving by remember { mutableStateOf(false) }
   var selectedCategoryId by rememberSaveable { mutableStateOf<String?>(null) }
   var date by rememberSaveable { mutableStateOf(Dates.todayIso()) }
   var title by rememberSaveable { mutableStateOf("") }
@@ -155,7 +154,10 @@ fun TransactionFormScreen(
   }
 
   val currencyOptions = currencies
-  val accountOptions = accounts.filter { it.currencyId == selectedCurrencyId }
+  val isTransfer = type == TransactionType.TRANSFER
+  val transferCurrencies = remember(accounts) { transferCurrencyIds(accounts) }
+  val accountOptions = accounts.filter { it.currencyId == selectedCurrencyId && (!it.archived ||
+    transactionId != null && (it.id == selectedAccountId || it.id == destinationAccountId)) }
 
   // Load existing transaction for edit mode.
   LaunchedEffect(transactionId, ownerId) {
@@ -165,6 +167,7 @@ fun TransactionFormScreen(
       amountText = formatAmountForInput(existing.amount)
       selectedCurrencyId = existing.currencyId
       selectedAccountId = existing.accountId
+      destinationAccountId = existing.destinationAccountId
       selectedCategoryId = existing.categoryId
       date = existing.date
       title = existing.title.orEmpty()
@@ -188,22 +191,32 @@ fun TransactionFormScreen(
   // React to the currencies list arriving: always keep a valid selection and
   // default to the default currency (USD by default) in add mode. Never
   // clobber a selection while the list is still loading (preset pre-fill).
-  LaunchedEffect(currencies) {
-    if (currencies.isNotEmpty() &&
-      (selectedCurrencyId == null || currencies.none { it.id == selectedCurrencyId })
+  LaunchedEffect(currencies, transferCurrencies, isTransfer) {
+    // Prefer a usable transfer currency, but never replace a historical edit's currency.
+    val available = if (isTransfer && transactionId == null) {
+      currencies.filter { it.id in transferCurrencies }.ifEmpty { currencies }
+    } else currencies
+    if (available.isNotEmpty() &&
+      (selectedCurrencyId == null || available.none { it.id == selectedCurrencyId })
     ) {
-      selectedCurrencyId = currencies.firstOrNull { it.isDefault }?.id ?: currencies.firstOrNull()?.id
+      selectedCurrencyId = available.firstOrNull { it.isDefault }?.id ?: available.firstOrNull()?.id
     }
   }
 
   // React to the accounts list arriving: keep a valid account for the
   // selected currency, preferring that currency's default account.
   LaunchedEffect(accounts, selectedCurrencyId) {
-    if (accounts.isNotEmpty() &&
-      (selectedAccountId == null || accounts.none { it.id == selectedAccountId && it.currencyId == selectedCurrencyId })
+    if (accountOptions.isNotEmpty() &&
+      (selectedAccountId == null || accountOptions.none { it.id == selectedAccountId })
     ) {
-      val forCurrency = accounts.filter { it.currencyId == selectedCurrencyId }
+      val forCurrency = accountOptions
       selectedAccountId = forCurrency.firstOrNull { it.isDefault }?.id ?: forCurrency.firstOrNull()?.id
+    }
+  }
+
+  LaunchedEffect(accounts, selectedCurrencyId, selectedAccountId) {
+    if (isTransfer && accountOptions.none { it.id == destinationAccountId && it.id != selectedAccountId }) {
+      destinationAccountId = accountOptions.firstOrNull { it.id != selectedAccountId }?.id
     }
   }
 
@@ -221,6 +234,7 @@ fun TransactionFormScreen(
   }
 
   fun save() {
+    if (saving) return
     when (val calculation = amountCalculation) {
       is AmountExpressionResult.Valid -> {
         error = "Tap OK to use the calculated amount"
@@ -241,10 +255,18 @@ fun TransactionFormScreen(
     if (amountMinor <= 0) { error = "Amount must be positive"; return }
     val currencyId = selectedCurrencyId ?: run { error = "Pick a currency"; return }
     val accountId = selectedAccountId ?: run { error = "Pick an account"; return }
+    val destination = if (isTransfer) destinationAccountId ?: run { error = "Choose a destination account"; return } else null
 
+    saving = true
     scope.launch {
       try {
-        if (transactionId == null) {
+        if (isTransfer) {
+          container.transactionRepository.saveTransfer(
+            ownerId = ownerId, id = transactionId, amount = amountMinor, currencyId = currencyId,
+            sourceAccountId = accountId, destinationAccountId = requireNotNull(destination),
+            date = date, title = title, notes = notes,
+          )
+        } else if (transactionId == null) {
           container.transactionRepository.add(
             ownerId = ownerId,
             type = type,
@@ -275,6 +297,8 @@ fun TransactionFormScreen(
         onSaved()
       } catch (e: Exception) {
         error = e.message ?: "Could not save"
+      } finally {
+        saving = false
       }
     }
   }
@@ -306,7 +330,8 @@ fun TransactionFormScreen(
             color = spec.accent,
           )
           Text(
-            if (transactionId == null) "ADD TRANSACTION" else "EDIT TRANSACTION",
+            if (isTransfer) { if (transactionId == null) "TRANSFER FUNDS" else "EDIT TRANSFER" }
+            else if (transactionId == null) "ADD TRANSACTION" else "EDIT TRANSACTION",
             style = MaterialTheme.typography.headlineSmall,
             color = spec.ink,
           )
@@ -328,7 +353,9 @@ fun TransactionFormScreen(
         }
       }
 
-      BrSegmentedToggle(
+      if (isTransfer) {
+        Text("Move money between accounts in the same currency.", style = MaterialTheme.typography.bodySmall, color = spec.muted)
+      } else BrSegmentedToggle(
         options = listOf("Expense", "Income"),
         // GOAL withdrawals are money-out, so they sit on the Expense side.
         selectedIndex = if (type == TransactionType.INCOME) 1 else 0,
@@ -361,7 +388,7 @@ fun TransactionFormScreen(
         type = type,
       )
 
-      BrTextField(
+      if (!isTransfer) BrTextField(
         value = title,
         onValueChange = { title = it },
         label = "WHAT WAS IT FOR? (OPTIONAL)",
@@ -370,15 +397,16 @@ fun TransactionFormScreen(
 
       Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
         SectionLabel("CURRENCY")
-        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
           currencyOptions.forEach { currency ->
             BrChip(
               currency.code,
               selected = selectedCurrencyId == currency.id,
               large = true,
+              enabled = !isTransfer || currency.id in transferCurrencies,
               onClick = {
                 selectedCurrencyId = currency.id
-                val forCurrency = accounts.filter { it.currencyId == currency.id }
+                val forCurrency = accounts.filter { it.currencyId == currency.id && !it.archived }
                 selectedAccountId = forCurrency.firstOrNull { it.isDefault }?.id ?: forCurrency.firstOrNull()?.id
               },
             )
@@ -386,12 +414,12 @@ fun TransactionFormScreen(
         }
       }
 
-      Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+      if (!isTransfer) Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
         SectionLabel("ACCOUNT")
         if (accountOptions.isEmpty()) {
           Text("No accounts for this currency", style = MaterialTheme.typography.labelSmall, color = spec.muted)
         } else {
-          Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+          Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             accountOptions.forEach { account ->
               BrChip(account.name, selected = selectedAccountId == account.id, large = true, onClick = { selectedAccountId = account.id })
             }
@@ -399,7 +427,20 @@ fun TransactionFormScreen(
         }
       }
 
-      Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+      if (isTransfer) {
+        TransferAccountFlow(
+          accounts = accountOptions, sourceId = selectedAccountId, destinationId = destinationAccountId,
+          currencyCode = selectedCurrency?.code ?: "—",
+          onSourceChange = { selectedAccountId = it },
+          onDestinationChange = { destinationAccountId = it },
+          onSwap = {
+            val source = selectedAccountId
+            selectedAccountId = destinationAccountId
+            destinationAccountId = source
+          },
+        )
+        BrTextField(value = title, onValueChange = { title = it }, label = "TITLE (OPTIONAL)", modifier = Modifier.fillMaxWidth())
+      } else Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
         SectionLabel("CATEGORY")
         Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.horizontalScroll(rememberScrollState())) {
           BrChip("ALL ▸", selected = false, onClick = { categorySearch = ""; showCategoryModal = true })
@@ -473,14 +514,15 @@ fun TransactionFormScreen(
             )
           } else {
             BrButton(
-              text = if (transactionId == null) "ADD TRANSACTION" else "UPDATE TRANSACTION",
+              text = if (isTransfer) { if (transactionId == null) "TRANSFER" else "UPDATE TRANSFER" }
+              else if (transactionId == null) "ADD TRANSACTION" else "UPDATE TRANSACTION",
               onClick = { save() },
-              enabled = hasPositivePlainAmount,
+              enabled = hasPositivePlainAmount && !saving && (!isTransfer || destinationAccountId != null && destinationAccountId != selectedAccountId),
               modifier = Modifier.fillMaxWidth(),
             )
             if (transactionId != null) {
               Text(
-                "DELETE TRANSACTION",
+                if (isTransfer) "DELETE TRANSFER" else "DELETE TRANSACTION",
                 style = MaterialTheme.typography.labelMedium,
                 color = spec.expense,
                 modifier = Modifier
@@ -498,7 +540,7 @@ fun TransactionFormScreen(
 
   if (showDeleteConfirm && transactionId != null) {
     BrDialog(
-      title = "DELETE TRANSACTION?",
+      title = if (isTransfer) "DELETE TRANSFER?" else "DELETE TRANSACTION?",
       onDismiss = { showDeleteConfirm = false },
       confirmText = "DELETE",
       onConfirm = {
@@ -512,6 +554,7 @@ fun TransactionFormScreen(
       Text(
         if (type == TransactionType.GOAL)
           "This also un-completes its goal and removes the goal's other withdrawals."
+        else if (isTransfer) "This removes the transfer and reverses its effect on both account balances."
         else "This removes it permanently.",
         style = MaterialTheme.typography.bodyMedium,
       )
@@ -551,7 +594,6 @@ fun TransactionFormScreen(
                 Row(
                   Modifier
                     .fillMaxWidth()
-                    .background(if (selectedCategoryId == category.id) spec.surfaceAlt else spec.surface)
                     .clickable {
                       selectedCategoryId = category.id
                       showCategoryModal = false
@@ -603,21 +645,15 @@ fun TransactionFormScreen(
   }
 
   if (showDatePicker) {
-    val datePickerState = rememberDatePickerState(initialSelectedDateMillis = LocalDate.parse(date).atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli())
-    BrDialog(
+    com.joeabouserhal.financetracker.ui.components.BrDatePickerDialog(
       title = "Choose date",
       onDismiss = { showDatePicker = false },
-      confirmText = "Apply",
-      onConfirm = {
-        datePickerState.selectedDateMillis?.let { millis ->
-          date = Instant.ofEpochMilli(millis).atZone(ZoneOffset.UTC).toLocalDate().toString()
-        }
+      initialDate = LocalDate.parse(date),
+      onSelect = { chosen ->
+        date = chosen.toString()
         showDatePicker = false
       },
-      wide = true,
-    ) {
-      DatePicker(state = datePickerState, modifier = Modifier.fillMaxWidth())
-    }
+    )
   }
 }
 
@@ -634,8 +670,8 @@ private fun AmountEditor(
   type: TransactionType,
 ) {
   val spec = LocalThemeSpec.current
-  val typeColor = if (type == TransactionType.INCOME) spec.income else spec.expense
-  val typeLabel = if (type == TransactionType.INCOME) "MONEY IN" else "MONEY OUT"
+  val typeColor = if (type == TransactionType.TRANSFER) spec.transfer else if (type == TransactionType.INCOME) spec.income else spec.expense
+  val typeLabel = if (type == TransactionType.TRANSFER) "TRANSFER" else if (type == TransactionType.INCOME) "MONEY IN" else "MONEY OUT"
   val amountTransformation = remember { ThousandsSeparatorTransformation() }
   val focusRequester = remember { FocusRequester() }
   var fieldValue by remember { mutableStateOf(TextFieldValue(value, TextRange(value.length))) }

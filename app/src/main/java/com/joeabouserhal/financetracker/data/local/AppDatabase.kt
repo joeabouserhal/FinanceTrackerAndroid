@@ -43,7 +43,7 @@ import com.joeabouserhal.financetracker.data.local.entities.RecurringScheduleEnt
       RecurringScheduleEntity::class,
       RecurringOccurrenceEntity::class,
     ],
-  version = 14,
+  version = 15,
   exportSchema = true,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -260,6 +260,40 @@ object Migrations {
     }
   }
 
+  val MIGRATION_14_15 = object : Migration(14, 15) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+      db.execSQL("""
+        CREATE TABLE `transactions_new` (
+          `id` TEXT NOT NULL, `owner_id` TEXT NOT NULL, `type` TEXT NOT NULL,
+          `amount` INTEGER NOT NULL, `currency_id` TEXT NOT NULL, `category_id` TEXT,
+          `account_id` TEXT, `date` TEXT NOT NULL, `title` TEXT, `notes` TEXT,
+          `preset_id` TEXT, `goal_id` TEXT, `created_at` TEXT NOT NULL, `updated_at` TEXT NOT NULL,
+          `sync_version` TEXT NOT NULL DEFAULT '', `deleted_at` TEXT,
+          `recurrence_occurrence_id` TEXT, `destination_account_id` TEXT,
+          PRIMARY KEY(`id`),
+          FOREIGN KEY(`currency_id`) REFERENCES `currencies`(`id`) ON UPDATE NO ACTION ON DELETE RESTRICT,
+          FOREIGN KEY(`category_id`) REFERENCES `categories`(`id`) ON UPDATE NO ACTION ON DELETE RESTRICT,
+          FOREIGN KEY(`account_id`) REFERENCES `accounts`(`id`) ON UPDATE NO ACTION ON DELETE SET NULL,
+          FOREIGN KEY(`destination_account_id`) REFERENCES `accounts`(`id`) ON UPDATE NO ACTION ON DELETE RESTRICT,
+          FOREIGN KEY(`preset_id`) REFERENCES `presets`(`id`) ON UPDATE NO ACTION ON DELETE SET NULL,
+          FOREIGN KEY(`goal_id`) REFERENCES `goals`(`id`) ON UPDATE NO ACTION ON DELETE SET NULL
+        )
+      """.trimIndent())
+      db.execSQL("""
+        INSERT INTO `transactions_new` (id,owner_id,type,amount,currency_id,category_id,account_id,date,title,notes,
+          preset_id,goal_id,created_at,updated_at,sync_version,deleted_at,recurrence_occurrence_id)
+        SELECT id,owner_id,type,amount,currency_id,category_id,account_id,date,title,notes,
+          preset_id,goal_id,created_at,updated_at,sync_version,deleted_at,recurrence_occurrence_id FROM `transactions`
+      """.trimIndent())
+      db.execSQL("DROP TABLE `transactions`")
+      db.execSQL("ALTER TABLE `transactions_new` RENAME TO `transactions`")
+      listOf("owner_id", "currency_id", "category_id", "account_id", "destination_account_id", "preset_id", "goal_id", "recurrence_occurrence_id").forEach {
+        db.execSQL("CREATE INDEX `index_transactions_${it}` ON `transactions` (`${it}`)")
+      }
+      db.execSQL("CREATE INDEX `index_transactions_owner_id_date` ON `transactions` (`owner_id`, `date`)")
+    }
+  }
+
   val ALL: Array<Migration> =
-    arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14)
+    arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14, MIGRATION_14_15)
 }

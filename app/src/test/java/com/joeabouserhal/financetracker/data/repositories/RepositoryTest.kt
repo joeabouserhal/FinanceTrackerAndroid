@@ -62,6 +62,87 @@ class RepositoryTest {
   }
 
   @Test
+  fun `transfer moves both balances and leaves monthly totals unchanged`() = runTest {
+    val owner = GUEST_OWNER_ID
+    val currency = currencyRepo.getAll(owner).first()
+    val source = accountRepo.observeActive(owner).first().first { it.currencyId == currency.id }
+    val destination = accountRepo.add(owner, currency.id, "Bank")
+    transactionRepo.add(owner, TransactionType.INCOME, 10000, currency.id, null, source.id, "2026-10-01", null, null, null)
+    val tx = transactionRepo.saveTransfer(owner, amount = 2500, currencyId = currency.id,
+      sourceAccountId = source.id, destinationAccountId = destination.id, date = "2026-10-02")
+    val dashboard = dashboardRepo.observe(owner, "2026-10-01", "2026-10-31").first()
+    val balances = dashboard.balances.first { it.currency.id == currency.id }
+    assertEquals(10000L, balances.totalMinor)
+    assertEquals(7500L, balances.accounts.first { it.account.id == source.id }.balanceMinor)
+    assertEquals(2500L, balances.accounts.first { it.account.id == destination.id }.balanceMinor)
+    assertEquals(0L, dashboard.monthly.first { it.currency.id == currency.id }.expenseMinor)
+    assertEquals(1, db.transactionDao().countByAccount(owner, destination.id))
+    assertTrue(db.outboxDao().getAllForOwner(owner).isEmpty())
+    val updated = transactionRepo.saveTransfer(owner, tx.id, 3000, currency.id, destination.id, source.id, "2026-10-03")
+    assertEquals(tx.createdAt, updated.createdAt)
+    assertEquals(13000L, accountBalanceMap(db.transactionDao().getAll(owner))[source.id])
+    transactionRepo.remove(owner, tx.id)
+    assertEquals(10000L, accountBalanceMap(db.transactionDao().getAll(owner))[source.id])
+    assertEquals(0L, accountBalanceMap(db.transactionDao().getAll(owner))[destination.id] ?: 0L)
+  }
+
+  @Test
+  fun `invalid transfers never write either a row or outbox operation`() = runTest {
+    val owner = "transfer-owner"
+    GuestSeeder.seedGuestDefaults(db, owner)
+    GuestSeeder.seedGuestDefaults(db, "other-owner")
+    val currency = currencyRepo.getAll(owner).first()
+    val source = accountRepo.observeActive(owner).first().first { it.currencyId == currency.id }
+    val bank = accountRepo.add(owner, currency.id, "Bank")
+    val other = accountRepo.observeActive("other-owner").first().first()
+    val differentCurrency = currencyRepo.add(owner, "EUR", "€", "Euro")
+    val differentAccount = accountRepo.observeActive(owner).first().first { it.currencyId == differentCurrency.id }
+    db.outboxDao().deleteForOwner(owner)
+    suspend fun rejects(amount: Long = 100, destination: String = bank.id, date: String = "2026-10-02") {
+      try {
+        transactionRepo.saveTransfer(owner, amount = amount, currencyId = currency.id,
+          sourceAccountId = source.id, destinationAccountId = destination, date = date)
+        throw AssertionError("Transfer should be rejected")
+      } catch (_: IllegalArgumentException) { }
+      assertTrue(db.transactionDao().getAll(owner).isEmpty())
+      assertTrue(db.outboxDao().getAllForOwner(owner).isEmpty())
+    }
+    rejects(amount = 0)
+    rejects(destination = source.id)
+    rejects(destination = other.id)
+    rejects(destination = differentAccount.id)
+    rejects(date = "2026-02-30")
+    accountRepo.archive(owner, bank.id)
+    db.outboxDao().deleteForOwner(owner)
+    rejects()
+  }
+
+  @Test
+  fun `synced transfer is a single complete operation with tombstone on deletion`() = runTest {
+    val owner = "transfer-owner"
+    GuestSeeder.seedGuestDefaults(db, owner)
+    val currency = currencyRepo.getAll(owner).first()
+    val source = accountRepo.observeActive(owner).first().first { it.currencyId == currency.id }
+    val bank = accountRepo.add(owner, currency.id, "Bank")
+    db.outboxDao().deleteForOwner(owner)
+    val tx = transactionRepo.saveTransfer(owner, amount = 1250, currencyId = currency.id,
+      sourceAccountId = source.id, destinationAccountId = bank.id, date = "2026-10-02")
+    val op = db.outboxDao().getAllForOwner(owner).single()
+    val payload = kotlinx.serialization.json.Json.parseToJsonElement(op.payloadJson) as kotlinx.serialization.json.JsonObject
+    // updated_at is added by the server trigger, not sent in an outbox payload.
+    val row = com.joeabouserhal.financetracker.data.sync.SyncMappers.transaction(
+      kotlinx.serialization.json.JsonObject(payload + ("updated_at" to kotlinx.serialization.json.JsonPrimitive(tx.updatedAt))))
+    assertEquals(tx.id, row.id)
+    assertEquals(bank.id, row.destinationAccountId)
+    assertEquals(TransactionType.TRANSFER, row.type)
+    assertEquals(null, row.categoryId)
+    transactionRepo.remove(owner, tx.id)
+    assertTrue(db.transactionDao().getById(owner, tx.id)?.deletedAt != null)
+    assertTrue(db.transactionDao().getAll(owner).isEmpty())
+    assertEquals(OutboxAction.DELETE, db.outboxDao().getAllForOwner(owner).last().action)
+  }
+
+  @Test
   fun `transaction falls back to Other category when none provided`() = runTest {
     val currency = currencyRepo.getAll(GUEST_OWNER_ID).first()
     val account = accountRepo.observeActive(GUEST_OWNER_ID).first().first()

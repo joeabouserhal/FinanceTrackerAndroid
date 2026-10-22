@@ -3,7 +3,6 @@ package com.joeabouserhal.financetracker.ui.components
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
@@ -22,6 +21,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -46,6 +50,10 @@ fun BrFab(
   )
   val face = spec.accent
   val contentColor = spec.onAccent
+  val rotation by animateFloatAsState(
+    targetValue = if (expanded) 45f else 0f,
+    label = "fabExpansion",
+  )
 
   Row(
     modifier =
@@ -54,8 +62,12 @@ fun BrFab(
         .height(54.dp)
         .width(104.dp)
         .background(face)
-        .border(spec.borderWidth, spec.onAccent.copy(alpha = 0.72f))
+        .semantics {
+          this.contentDescription = contentDescription
+          stateDescription = if (expanded) "Expanded" else "Collapsed"
+        }
         .clickable(
+          role = Role.Button,
           interactionSource = interactionSource,
           indication = null,
           onClick = onClick,
@@ -74,10 +86,10 @@ fun BrFab(
       modifier = Modifier.width(48.dp),
     )
     Icon(
-      painter = painterResource(if (expanded) R.drawable.ic_close else R.drawable.ic_add),
-      contentDescription = contentDescription,
+      painter = painterResource(R.drawable.ic_add),
+      contentDescription = null,
       tint = contentColor,
-      modifier = Modifier.size(22.dp),
+      modifier = Modifier.size(22.dp).rotate(rotation),
     )
   }
 }

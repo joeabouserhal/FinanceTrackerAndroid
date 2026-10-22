@@ -76,6 +76,7 @@ fun DashboardScreen(
   onAddFromPreset: () -> Unit,
   onEditTransaction: (String) -> Unit,
   onSeeAllTransactions: () -> Unit,
+  onTransfer: () -> Unit = {},
 ) {
   val container = rememberAppContainer()
   val session by container.sessionManager.session.collectAsStateWithLifecycle(initialValue = Session())
@@ -121,6 +122,7 @@ fun DashboardScreen(
       }
 
       ExpandableFab(
+        onTransfer = onTransfer,
         onAddTransaction = onAddTransaction,
         onAddFromPreset = onAddFromPreset,
         modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp),

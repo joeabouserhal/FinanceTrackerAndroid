@@ -36,6 +36,9 @@ data class ThemeSpec(
   val shadowOffset: Dp = 2.dp,
   val cornerRadius: Dp = 0.dp,
 ) {
+  /** Blue for internal transfers, adjusted for the current surface brightness. */
+  val transfer: Color get() = if (isDark) Color(0xFF79B8FF) else Color(0xFF1765B8)
+
   fun toColorScheme(): ColorScheme {
     val base = if (isDark) darkColorScheme() else lightColorScheme()
     return base.copy(

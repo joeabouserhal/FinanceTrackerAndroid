@@ -1,6 +1,5 @@
 package com.joeabouserhal.financetracker.ui.goals
 
-import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -174,7 +173,7 @@ private fun GoalFieldGroup(label: String, content: @Composable () -> Unit) {
 @Composable
 internal fun GoalHint(text: String) {
   val spec = LocalThemeSpec.current
-  Text(text, Modifier.fillMaxWidth().background(spec.surfaceAlt).padding(12.dp), style = MaterialTheme.typography.bodySmall, color = spec.muted)
+  Text(text, Modifier.fillMaxWidth(), style = MaterialTheme.typography.bodySmall, color = spec.muted)
 }
 
 @Composable

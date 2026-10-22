@@ -10,7 +10,6 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -18,10 +17,9 @@ import androidx.compose.ui.unit.dp
 import com.joeabouserhal.financetracker.theme.LocalThemeSpec
 import com.joeabouserhal.financetracker.ui.components.BrChip
 import com.joeabouserhal.financetracker.ui.components.BrDialog
-import java.time.Instant
+import com.joeabouserhal.financetracker.ui.components.BrDateRangePicker
 import java.time.LocalDate
 import java.time.YearMonth
-import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -32,21 +30,18 @@ internal fun ReportPeriodDialog(period: ReportPeriod, today: LocalDate, onDismis
   var year by rememberSaveable { mutableIntStateOf(period.month.year) }
   var month by rememberSaveable { mutableIntStateOf(period.month.monthValue) }
   val initialWindow = period.custom ?: period.window(today)
-  val rangeState = rememberDateRangePickerState(
-    initialSelectedStartDateMillis = initialWindow?.start?.atStartOfDay(ZoneOffset.UTC)?.toInstant()?.toEpochMilli(),
-    initialSelectedEndDateMillis = initialWindow?.end?.atStartOfDay(ZoneOffset.UTC)?.toInstant()?.toEpochMilli(),
-  )
+  var rangeStart by remember { mutableStateOf(initialWindow?.start) }
+  var rangeEnd by remember { mutableStateOf(initialWindow?.end) }
   val selectedMonth = YearMonth.of(year, month)
   val valid = when (kind) {
     ReportPeriodKind.MONTH -> selectedMonth <= YearMonth.from(today)
     ReportPeriodKind.YEAR -> year <= today.year
-    ReportPeriodKind.CUSTOM -> rangeState.selectedStartDateMillis != null && rangeState.selectedEndDateMillis != null
+    ReportPeriodKind.CUSTOM -> rangeStart != null && rangeEnd != null
     ReportPeriodKind.ALL -> true
   }
-  BrDialog(title = "Report period", onDismiss = onDismiss, confirmText = "APPLY", confirmEnabled = valid, wide = true, onConfirm = {
+  BrDialog(title = "Report period", onDismiss = onDismiss, confirmText = "APPLY", confirmEnabled = valid, wide = true, scrollContent = true, onConfirm = {
     val custom = if (kind == ReportPeriodKind.CUSTOM) ReportWindow(
-      Instant.ofEpochMilli(requireNotNull(rangeState.selectedStartDateMillis)).atZone(ZoneOffset.UTC).toLocalDate(),
-      Instant.ofEpochMilli(requireNotNull(rangeState.selectedEndDateMillis)).atZone(ZoneOffset.UTC).toLocalDate(),
+      requireNotNull(rangeStart), requireNotNull(rangeEnd),
     ) else null
     onSelect(ReportPeriod(kind, selectedMonth, custom))
   }) {
@@ -75,7 +70,7 @@ internal fun ReportPeriodDialog(period: ReportPeriod, today: LocalDate, onDismis
               row.forEach { value ->
                 val enabled = YearMonth.of(year, value) <= YearMonth.from(today)
                 val selected = value == month
-                Box(Modifier.weight(1f).heightIn(min = 48.dp).background(if (selected && enabled) spec.accent else spec.surfaceAlt)
+                Box(Modifier.weight(1f).heightIn(min = 48.dp).background(if (selected && enabled) spec.accent else androidx.compose.ui.graphics.Color.Transparent)
                   .clickable(enabled = enabled, role = Role.Button) { month = value }.padding(vertical = 10.dp), contentAlignment = Alignment.Center) {
                   Text(YearMonth.of(year, value).format(DateTimeFormatter.ofPattern("MMM")), style = MaterialTheme.typography.labelMedium,
                     color = if (!enabled) spec.muted.copy(alpha = 0.4f) else if (selected) spec.onAccent else spec.ink)
@@ -85,8 +80,7 @@ internal fun ReportPeriodDialog(period: ReportPeriod, today: LocalDate, onDismis
           }
         }
       }
-      ReportPeriodKind.CUSTOM -> DateRangePicker(state = rangeState, title = null, headline = null,
-        modifier = Modifier.fillMaxWidth().heightIn(max = LocalConfiguration.current.screenHeightDp.dp * 0.45f))
+      ReportPeriodKind.CUSTOM -> BrDateRangePicker(rangeStart, rangeEnd) { start, end -> rangeStart = start; rangeEnd = end }
       ReportPeriodKind.ALL -> Text("All recorded activity, grouped by currency. Previous-period comparisons are hidden.", style = MaterialTheme.typography.bodyMedium, color = spec.muted)
     }
   }
