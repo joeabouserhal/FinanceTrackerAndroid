@@ -19,6 +19,32 @@ import kotlinx.coroutines.CancellationException
  * the security boundary.
  */
 class SupabaseSyncApi(private val client: SupabaseClient?) : SyncApi {
+  override suspend fun applyBatch(operations: List<com.joeabouserhal.financetracker.data.local.entities.OutboxEntity>): List<MutationResult?> {
+    require(operations.isNotEmpty() && operations.map { it.batchId }.distinct().size == 1)
+    val input = JsonArray(operations.map { op -> JsonObject(mapOf(
+      "operation_id" to JsonPrimitive(op.opId), "table" to JsonPrimitive(op.tableName),
+      "action" to JsonPrimitive(op.action.name.lowercase()),
+      "payload" to kotlinx.serialization.json.Json.parseToJsonElement(op.payloadJson),
+    )) })
+    val response = requireClient().postgrest.rpc("apply_sync_batch", JsonObject(mapOf(
+      "p_batch_id" to JsonPrimitive(operations.first().batchId), "p_operations" to input,
+    ))).decodeAs<JsonObject>()
+    check(response["protocol"] == JsonPrimitive(3) && response["batch_id"] == JsonPrimitive(operations.first().batchId)) { "Unverified batch acknowledgment" }
+    val results = response["results"] as? JsonArray ?: error("Missing batch results")
+    check(results.size == operations.size) { "Incomplete batch acknowledgment" }
+    return results.mapIndexed { index, element ->
+      val result = element as? JsonObject ?: error("Invalid batch result")
+      val op = operations[index]
+      val payload = kotlinx.serialization.json.Json.parseToJsonElement(op.payloadJson) as JsonObject
+      val key = if (op.tableName == "profiles") "user_id" else "id"
+      val status = result["status"]?.jsonPrimitive?.contentOrNull
+      check(result["operation_id"] == JsonPrimitive(op.opId) && result["table"] == JsonPrimitive(op.tableName) && result["id"] == payload[key]) { "Batch acknowledgment identity mismatch" }
+      check(status in setOf("applied", "stale", "deleted", "superseded")) { "Invalid batch acknowledgment status" }
+      val row = result["row"]?.takeIf { it != JsonNull } as? JsonObject
+      check(row != null || status in setOf("deleted", "superseded")) { "Missing canonical row" }
+      MutationResult(status!!, row)
+    }
+  }
 
   private fun requireClient(): SupabaseClient =
     client ?: error("Supabase is not configured — sync should have been skipped")

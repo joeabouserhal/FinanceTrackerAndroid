@@ -142,13 +142,13 @@ class ManagementPagesTest {
   @Test fun currencyFormValidationAndPinnedActionsAtLargeText() {
     var saved = false
     launch(large = true, light = true) {
-      CurrencyDialog("Add currency", null, {}, { _, _, _, _ -> saved = true })
+      CurrencyDialog("Add currency", null, {}, { _, _, _, _, _ -> saved = true })
     }
     compose.onNodeWithText("SAVE").assertIsDisplayed().performClick()
     compose.runOnIdle { assertFalse(saved) }
     compose.onNodeWithText("Currency code is required").performScrollTo().assertIsDisplayed()
-    compose.onNodeWithText("CODE · e.g. USD").performScrollTo().performTextInput("GBP")
-    compose.onNodeWithText("NAME").performScrollTo().performTextInput("Pound sterling")
+    compose.onNodeWithText("CODE · USD").performScrollTo().performTextInput("GBP")
+    compose.onNodeWithText("NAME · United States Dollar").performScrollTo().performTextInput("Pound sterling")
     compose.onNodeWithText("SAVE").assertIsDisplayed().performClick()
     compose.runOnIdle { assertTrue(saved) }
   }

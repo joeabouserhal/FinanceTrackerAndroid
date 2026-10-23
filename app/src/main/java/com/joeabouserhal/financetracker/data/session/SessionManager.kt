@@ -56,6 +56,7 @@ class SessionManager(
   suspend fun setUserSession(ownerId: String) {
     require(ownerId.isNotBlank() && ownerId != GUEST_OWNER_ID) { "invalid user owner id" }
     dataStore.edit { it[Keys.ACTIVE_OWNER] = ownerId }
+    db.outboxDao().resetAuthFailures(ownerId)
   }
 
   /** Back to the guest partition (guest data stays untouched). */

@@ -1,6 +1,6 @@
 package com.joeabouserhal.financetracker.data.repositories
 
-import androidx.room.withTransaction
+import com.joeabouserhal.financetracker.data.local.withMutation
 import com.joeabouserhal.financetracker.data.local.AppDatabase
 import com.joeabouserhal.financetracker.data.local.OutboxWriter
 import com.joeabouserhal.financetracker.data.local.dao.CategoryDao
@@ -27,6 +27,9 @@ class TransactionRepository(
 
   fun observeRecent(ownerId: String, limit: Int): Flow<List<TransactionEntity>> = dao.observeRecent(ownerId, limit)
 
+  fun observeForAccount(ownerId: String, accountId: String): Flow<List<TransactionEntity>> = dao.observeForAccount(ownerId, accountId)
+  fun observePage(query: androidx.sqlite.db.SupportSQLiteQuery): Flow<List<TransactionEntity>> = dao.observePage(query)
+
   suspend fun add(
     ownerId: String,
     type: TransactionType,
@@ -40,37 +43,47 @@ class TransactionRepository(
     presetId: String?,
     goalId: String? = null,
     recurrenceOccurrenceId: String? = null,
-  ): TransactionEntity {
+    recurrenceGeneration: Int = 0,
+  ): TransactionEntity = db.withMutation {
     require(type != TransactionType.TRANSFER) { "Use the transfer form to move funds" }
     require(amount > 0) { "Amount must be positive" }
     require(currencyId.isNotBlank()) { "Currency is required" }
     // Enforced category: fall back to the seeded "Other" of this type.
     val resolvedCategoryId = categoryId?.takeIf { it.isNotBlank() } ?: resolveOther(ownerId, type)
+    val resolvedDate = date?.takeIf { it.isNotBlank() } ?: LocalDate.now().toString()
+    validateReferences(ownerId, type, currencyId, resolvedCategoryId, accountId, resolvedDate, presetId, goalId)
+    val recurringId = recurrenceOccurrenceId?.let {
+      UUID.nameUUIDFromBytes("$ownerId:$it:$recurrenceGeneration".toByteArray(Charsets.UTF_8)).toString()
+    }
+    if (recurrenceOccurrenceId != null) {
+      dao.findRecurring(ownerId, recurrenceOccurrenceId, recurrenceGeneration)?.let { return@withMutation it }
+    }
 
     val now = java.time.Instant.now().toString()
     val entity =
       TransactionEntity(
-        id = UUID.randomUUID().toString(),
+        id = recurringId ?: UUID.randomUUID().toString(),
         ownerId = ownerId,
         type = type,
         amount = amount,
         currencyId = currencyId,
         categoryId = resolvedCategoryId,
         accountId = accountId?.takeIf { it.isNotBlank() },
-        date = date?.takeIf { it.isNotBlank() } ?: LocalDate.now().toString(),
+        date = resolvedDate,
         title = title?.takeIf { it.isNotBlank() },
         notes = notes?.takeIf { it.isNotBlank() },
         presetId = presetId?.takeIf { it.isNotBlank() },
         goalId = goalId?.takeIf { it.isNotBlank() },
         recurrenceOccurrenceId = recurrenceOccurrenceId?.takeIf { it.isNotBlank() },
+        recurrenceGeneration = recurrenceGeneration,
         createdAt = now,
         updatedAt = now,
       )
-    db.withTransaction {
+    db.withMutation {
       dao.upsert(entity)
       OutboxWriter.enqueue(db, ownerId, "transactions", OutboxAction.INSERT, OutboxWriter.transaction(ownerId, entity))
     }
-    return entity
+    entity
   }
 
   suspend fun update(
@@ -85,7 +98,7 @@ class TransactionRepository(
     title: String?,
     notes: String?,
     presetId: String?,
-  ) {
+  ) = db.withMutation {
     require(amount > 0) { "Amount must be positive" }
     require(currencyId.isNotBlank()) { "Currency is required" }
     // Manual edits don't clear the "created from preset" lineage: only an
@@ -93,6 +106,7 @@ class TransactionRepository(
     // editable from the form, so it always survives — and a goal withdrawal
     // can never be flipped to income.
     val existing = dao.getById(ownerId, id)
+    require(existing != null && existing.deletedAt == null) { "This transaction no longer exists" }
     require(existing?.type != TransactionType.TRANSFER && type != TransactionType.TRANSFER) { "Use the transfer form to edit this entry" }
     val effectiveType = if (existing?.goalId != null) TransactionType.GOAL else type
     // GOAL has no "Other" of its own type; goal withdrawals use the Goal category.
@@ -101,7 +115,9 @@ class TransactionRepository(
         existing?.goalId != null -> categoryId?.takeIf { it.isNotBlank() } ?: categoryRepository.ensureGoalCategory(ownerId).id
         else -> categoryId?.takeIf { it.isNotBlank() } ?: resolveOther(ownerId, type)
       }
-    db.withTransaction {
+    db.withMutation {
+      validateReferences(ownerId, effectiveType, currencyId, resolvedCategoryId, accountId,
+        date?.takeIf { it.isNotBlank() } ?: LocalDate.now().toString(), presetId ?: existing.presetId, existing.goalId, existing.accountId)
       dao.update(
         ownerId = ownerId,
         id = id,
@@ -129,8 +145,9 @@ class TransactionRepository(
    * account goals produce several) is deleted too.
    */
   suspend fun remove(ownerId: String, id: String) {
-    db.withTransaction {
+    db.withMutation {
       val existing = dao.getById(ownerId, id)
+      if (existing == null || existing.deletedAt != null) return@withMutation
       val goalId = existing?.goalId
       if (existing != null && existing.type == TransactionType.GOAL && goalId != null) {
         val goal = goalDao.getById(ownerId, goalId)
@@ -169,7 +186,7 @@ class TransactionRepository(
     ownerId: String, id: String? = null, amount: Long, currencyId: String,
     sourceAccountId: String, destinationAccountId: String, date: String,
     title: String? = null, notes: String? = null,
-  ): TransactionEntity = db.withTransaction {
+  ): TransactionEntity = db.withMutation {
     require(amount > 0) { "Amount must be positive" }
     require(sourceAccountId != destinationAccountId) { "Choose two different accounts" }
     require(runCatching { LocalDate.parse(date) }.isSuccess) { "Choose a valid date" }
@@ -205,4 +222,24 @@ class TransactionRepository(
   private suspend fun resolveOther(ownerId: String, type: TransactionType): String =
     categoryDao.getDefaultOther(ownerId, type)?.id
       ?: throw IllegalStateException("No default category found for $type")
+
+  private suspend fun validateReferences(
+    ownerId: String, type: TransactionType, currencyId: String, categoryId: String,
+    accountId: String?, date: String, presetId: String?, goalId: String?, existingAccountId: String? = null,
+  ) {
+    require(runCatching { LocalDate.parse(date) }.isSuccess) { "Choose a valid date" }
+    require(db.currencyDao().getById(ownerId, currencyId)?.deletedAt == null && db.currencyDao().getById(ownerId, currencyId) != null) { "Currency is unavailable" }
+    val category = categoryDao.getById(ownerId, categoryId)
+    val categoryType = if (type == TransactionType.GOAL) TransactionType.EXPENSE else type
+    require(category != null && category.deletedAt == null && category.type == categoryType) { "Choose a category for this transaction type" }
+    accountId?.let {
+      val account = db.accountDao().getById(ownerId, it)
+      require(account != null && account.deletedAt == null && account.currencyId == currencyId && (!account.archived || it == existingAccountId)) { "Choose an active account in the selected currency" }
+    }
+    presetId?.let { require(db.presetDao().getById(ownerId, it) != null) { "Preset is unavailable" } }
+    goalId?.let {
+      val goal = goalDao.getById(ownerId, it)
+      require(goal != null && goal.deletedAt == null && goal.currencyId == currencyId) { "Goal is unavailable for this currency" }
+    }
+  }
 }

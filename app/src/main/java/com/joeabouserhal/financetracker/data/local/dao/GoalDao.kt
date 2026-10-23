@@ -5,6 +5,7 @@ import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import androidx.room.Update
+import androidx.room.Upsert
 import com.joeabouserhal.financetracker.data.local.entities.GoalEntity
 import kotlinx.coroutines.flow.Flow
 
@@ -19,7 +20,7 @@ interface GoalDao {
   @Query("SELECT * FROM goals WHERE owner_id = :ownerId AND id = :id")
   suspend fun getById(ownerId: String, id: String): GoalEntity?
 
-  @Insert(onConflict = OnConflictStrategy.REPLACE)
+  @Upsert
   suspend fun upsert(entity: GoalEntity)
 
   /** Sync pull inserts: never replace (REPLACE cascades to child tables). */

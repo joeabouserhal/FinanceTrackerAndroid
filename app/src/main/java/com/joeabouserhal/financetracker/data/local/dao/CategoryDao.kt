@@ -5,6 +5,7 @@ import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import androidx.room.Update
+import androidx.room.Upsert
 import com.joeabouserhal.financetracker.data.local.entities.CategoryEntity
 import com.joeabouserhal.financetracker.data.local.entities.TransactionType
 import kotlinx.coroutines.flow.Flow
@@ -32,10 +33,10 @@ interface CategoryDao {
   )
   suspend fun getDefaultOther(ownerId: String, type: TransactionType): CategoryEntity?
 
-  @Insert(onConflict = OnConflictStrategy.REPLACE)
+  @Upsert
   suspend fun upsert(entity: CategoryEntity)
 
-  @Insert(onConflict = OnConflictStrategy.REPLACE)
+  @Upsert
   suspend fun upsertAll(entities: List<CategoryEntity>)
 
   /** Sync pull inserts: never replace (REPLACE cascades to child tables). */

@@ -34,4 +34,6 @@ data class AccountEntity(
   @ColumnInfo(name = "updated_at", defaultValue = "''") val updatedAt: String,
   @ColumnInfo(name = "sync_version", defaultValue = "''") val syncVersion: String = updatedAt,
   @ColumnInfo(name = "deleted_at") val deletedAt: String? = null,
+  /** Starting funds in minor units, separate from income/expense activity. */
+  @ColumnInfo(name = "opening_balance", defaultValue = "0") val openingBalanceMinor: Long = 0,
 )

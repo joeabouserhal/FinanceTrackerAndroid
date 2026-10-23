@@ -29,6 +29,23 @@ import org.robolectric.annotation.Config
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35], application = android.app.Application::class)
 class RepositoryTest {
+  @Test fun `paged transaction query filters before limiting and keeps Unicode search discoverable`() = runTest {
+    val currency = currencyRepo.getAll(GUEST_OWNER_ID).first()
+    val account = db.accountDao().getAll(GUEST_OWNER_ID).first { it.currencyId == currency.id }
+    val template = transactionRepo.add(GUEST_OWNER_ID, TransactionType.EXPENSE, 1, currency.id, null, account.id, "2026-10-01", "Café", null, null)
+    db.transactionDao().upsertAll((1..120).map { template.copy(id = "page-$it", amount = it.toLong()) })
+    val filters = com.joeabouserhal.financetracker.ui.transactions.TransactionFilterState(currencyIds = setOf(currency.id), sort = com.joeabouserhal.financetracker.ui.transactions.SortOrder.LARGEST)
+    val rows = transactionRepo.observePage(com.joeabouserhal.financetracker.ui.transactions.TransactionFiltering.pageQuery(GUEST_OWNER_ID, filters, 11)).first()
+    assertEquals(11, rows.size)
+    assertEquals(120L, rows.first().amount)
+    assertEquals(110L, rows.last().amount)
+    assertTrue(transactionRepo.observePage(com.joeabouserhal.financetracker.ui.transactions.TransactionFiltering.pageQuery("another-owner", filters, 11)).first().isEmpty())
+    val search = filters.copy(search = "CAFÉ")
+    val candidates = transactionRepo.observePage(com.joeabouserhal.financetracker.ui.transactions.TransactionFiltering.pageQuery(GUEST_OWNER_ID, search, 11)).first()
+    assertEquals(121, candidates.size)
+    val matching = com.joeabouserhal.financetracker.ui.transactions.TransactionFiltering.apply(enrichTransactions(candidates, db.categoryDao().getAll(GUEST_OWNER_ID), db.accountDao().getAll(GUEST_OWNER_ID), currencyRepo.getAll(GUEST_OWNER_ID)), search)
+    assertEquals(121, matching.size)
+  }
   private lateinit var db: AppDatabase
   private lateinit var currencyRepo: CurrencyRepository
   private lateinit var accountRepo: AccountRepository
@@ -84,6 +101,49 @@ class RepositoryTest {
     transactionRepo.remove(owner, tx.id)
     assertEquals(10000L, accountBalanceMap(db.transactionDao().getAll(owner))[source.id])
     assertEquals(0L, accountBalanceMap(db.transactionDao().getAll(owner))[destination.id] ?: 0L)
+  }
+
+  @Test
+  fun `replacing expense income pairs with transfers preserves each account balance`() = runTest {
+    for (owner in listOf(GUEST_OWNER_ID, "replacement-owner")) {
+      GuestSeeder.seedGuestDefaults(db, owner)
+      val currency = currencyRepo.getAll(owner).first()
+      val cash = accountRepo.observeActive(owner).first().first { it.currencyId == currency.id }
+      val bank = accountRepo.add(owner, currency.id, "Replacement bank")
+      suspend fun entry(type: TransactionType, amount: Long, accountId: String) =
+        transactionRepo.add(owner, type, amount, currency.id, null, accountId, "2026-10-01", null, null, null)
+      entry(TransactionType.INCOME, 100000, cash.id)
+      entry(TransactionType.INCOME, 50000, bank.id)
+      entry(TransactionType.EXPENSE, 3000, cash.id)
+      entry(TransactionType.INCOME, 5000, bank.id)
+      val old = listOf(entry(TransactionType.EXPENSE, 20000, cash.id), entry(TransactionType.INCOME, 20000, bank.id),
+        entry(TransactionType.EXPENSE, 7250, bank.id), entry(TransactionType.INCOME, 7250, cash.id))
+      suspend fun balance() = dashboardRepo.observe(owner, "2026-10-01", "2026-10-31").first().balances.first { it.currency.id == currency.id }
+      val before = balance()
+      assertEquals(152000L, before.totalMinor)
+      old.forEach { transactionRepo.remove(owner, it.id) }
+      val transfer = transactionRepo.saveTransfer(owner, amount = 20000, currencyId = currency.id,
+        sourceAccountId = cash.id, destinationAccountId = bank.id, date = "2026-10-01")
+      transactionRepo.saveTransfer(owner, amount = 7250, currencyId = currency.id,
+        sourceAccountId = bank.id, destinationAccountId = cash.id, date = "2026-10-01")
+      val after = balance()
+      assertEquals(before.totalMinor, after.totalMinor)
+      assertEquals(before.accounts.associate { it.account.id to it.balanceMinor }, after.accounts.associate { it.account.id to it.balanceMinor })
+      transactionRepo.saveTransfer(owner, transfer.id, 19000, currency.id, cash.id, bank.id, "2026-10-01")
+      val edited = balance()
+      assertEquals(85250L, edited.accounts.first { it.account.id == cash.id }.balanceMinor)
+      assertEquals(66750L, edited.accounts.first { it.account.id == bank.id }.balanceMinor)
+      assertEquals(152000L, edited.totalMinor)
+      val all = db.transactionDao().getAll(owner)
+      edited.accounts.forEach { account ->
+        assertEquals(account.balanceMinor, accountBalanceMap(all)[account.account.id])
+        assertEquals(account.balanceMinor, transactionRepo.observeForAccount(owner, account.account.id).first().sumOf { it.amountForAccount(account.account.id) })
+      }
+      transactionRepo.remove(owner, transfer.id)
+      assertEquals(152000L, balance().totalMinor)
+      assertEquals(104250L, balance().accounts.first { it.account.id == cash.id }.balanceMinor)
+      assertEquals(47750L, balance().accounts.first { it.account.id == bank.id }.balanceMinor)
+    }
   }
 
   @Test
@@ -451,7 +511,9 @@ class RepositoryTest {
     assertEquals(2, ops.count { it.tableName == "accounts" })
 
     currencyRepo.delete(userId, added.id)
-    assertEquals(5, db.outboxDao().getAllForOwner(userId).size)
+    // Currency, its empty Cash account, and default promotion form one action.
+    assertEquals(7, db.outboxDao().getAllForOwner(userId).size)
+    assertEquals(1, db.outboxDao().getAllForOwner(userId).takeLast(3).map { it.batchId }.distinct().size)
   }
 
   @Test

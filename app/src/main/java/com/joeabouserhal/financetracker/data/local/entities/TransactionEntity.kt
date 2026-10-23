@@ -84,4 +84,5 @@ data class TransactionEntity(
   @ColumnInfo(name = "recurrence_occurrence_id") val recurrenceOccurrenceId: String? = null,
   /** For TRANSFER, accountId is the source and this is the destination. */
   @ColumnInfo(name = "destination_account_id") val destinationAccountId: String? = null,
+  @ColumnInfo(name = "recurrence_generation", defaultValue = "0") val recurrenceGeneration: Int = 0,
 )

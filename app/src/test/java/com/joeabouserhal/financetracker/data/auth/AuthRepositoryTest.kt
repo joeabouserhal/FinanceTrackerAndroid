@@ -25,6 +25,10 @@ private class FakeAuthApi(
   override suspend fun currentUserId(): String? = signInResult
 
   override suspend fun signOut() = Unit
+  override suspend fun requestPasswordReset(email: String) = Unit
+  override suspend fun openPasswordRecovery(code: String) = Unit
+  override suspend fun updateRecoveredPassword(password: String) = Unit
+  override suspend fun clearRecovery() = Unit
 }
 
 class AuthRepositoryTest {

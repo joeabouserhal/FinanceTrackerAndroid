@@ -53,6 +53,8 @@ fun MainNavigation(
   shortcutDestination: LauncherShortcutDestination? = null,
   onShortcutHandled: () -> Unit = {},
   onReady: () -> Unit = {},
+  passwordRecoveryLink: String? = null,
+  onRecoveryHandled: () -> Unit = {},
 ) {
   val container = rememberAppContainer()
   val scope = rememberCoroutineScope()
@@ -68,10 +70,14 @@ fun MainNavigation(
   }
 
   SideEffect { onReady() }
+  if (passwordRecoveryLink != null) {
+    com.joeabouserhal.financetracker.ui.auth.PasswordRecoveryScreen(passwordRecoveryLink, onRecoveryHandled)
+    return
+  }
   val needsAuth = currentSession.isGuest && authComplete != true
   val initial: NavKey = if (needsAuth) AuthFlow else Main
 
-  key(initial) {
+  key(initial, currentSession.ownerId) {
     val backStack = rememberNavBackStack(initial)
     LaunchedEffect(shortcutDestination, needsAuth) {
       if (shortcutDestination != null && !needsAuth) {
@@ -134,8 +140,10 @@ fun MainNavigation(
               onAddTransaction = { backStack.add(AddTransaction(presetId = null)) },
               onOpenPresetPicker = { backStack.add(PresetPicker) },
               onEditTransaction = { transactionId -> backStack.add(EditTransaction(transactionId)) },
+              onDuplicateTransaction = { backStack.add(AddTransaction(duplicateId = it)) },
               onOpenCurrenciesAccounts = { backStack.add(CurrenciesAccounts) },
               onOpenThemes = { backStack.add(Themes) },
+              onOpenAppLock = { backStack.add(AppLock) },
               onOpenCategories = { backStack.add(Categories) },
               onOpenPresets = { backStack.add(Presets) },
               onOpenCompletedGoals = { backStack.add(CompletedGoals) },
@@ -144,8 +152,10 @@ fun MainNavigation(
           }
           entry<AddTransaction> { navKey ->
             TransactionFormScreen(
+              ownerId = currentSession.ownerId,
               transactionId = null,
               presetId = navKey.presetId,
+              duplicateId = navKey.duplicateId,
               onBack = {
                 // ✕ from a preset-prefilled form skips the picker entirely
                 // and returns straight to the page that opened the flow.
@@ -170,6 +180,7 @@ fun MainNavigation(
           }
           entry<AddTransfer> {
             TransactionFormScreen(
+              ownerId = currentSession.ownerId,
               transactionId = null, transferMode = true,
               onBack = { backStack.removeLastOrNull() },
               onSaved = { backStack.removeLastOrNull() },
@@ -188,6 +199,7 @@ fun MainNavigation(
           }
           entry<EditTransaction> { navKey ->
             TransactionFormScreen(
+              ownerId = currentSession.ownerId,
               transactionId = navKey.transactionId,
               onBack = { backStack.removeLastOrNull() },
               onSaved = { backStack.removeLastOrNull() },
@@ -195,6 +207,7 @@ fun MainNavigation(
           }
           entry<CurrenciesAccounts> {
             CurrenciesAccountsScreen(
+              ownerId = currentSession.ownerId,
               onBack = { backStack.removeLastOrNull() },
               onOpenAccount = { accountId -> backStack.add(AccountDetail(accountId)) },
               modifier = Modifier.safeDrawingPadding(),
@@ -202,6 +215,12 @@ fun MainNavigation(
           }
           entry<Themes> {
             ThemesScreen(
+              onBack = { backStack.removeLastOrNull() },
+              modifier = Modifier.safeDrawingPadding(),
+            )
+          }
+          entry<AppLock> {
+            com.joeabouserhal.financetracker.ui.security.AppLockScreen(
               onBack = { backStack.removeLastOrNull() },
               modifier = Modifier.safeDrawingPadding(),
             )

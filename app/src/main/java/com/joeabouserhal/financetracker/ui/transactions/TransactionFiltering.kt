@@ -33,6 +33,41 @@ data class TransactionFilterState(
 }
 
 object TransactionFiltering {
+  /** Bound values only; identifiers and ordering are selected from fixed app enums. */
+  fun pageQuery(ownerId: String, f: TransactionFilterState, limit: Int): androidx.sqlite.db.SupportSQLiteQuery {
+    val clauses = mutableListOf("owner_id=?", "deleted_at IS NULL")
+    val args = mutableListOf<Any>(ownerId)
+    when (f.type) {
+      TypeFilter.ALL -> Unit
+      TypeFilter.EXPENSE -> clauses += "type IN ('EXPENSE','GOAL')"
+      TypeFilter.INCOME -> clauses += "type='INCOME'"
+      TypeFilter.TRANSFER -> clauses += "type='TRANSFER'"
+    }
+    fun ids(column: String, values: Set<String>) {
+      if (values.isNotEmpty()) { clauses += "$column IN (${values.joinToString(",") { "?" }})"; args.addAll(values.sorted()) }
+    }
+    ids("category_id", f.categoryIds)
+    ids("currency_id", f.currencyIds)
+    if (f.accountIds.isNotEmpty()) {
+      val placeholders = f.accountIds.joinToString(",") { "?" }
+      clauses += "(account_id IN ($placeholders) OR destination_account_id IN ($placeholders))"
+      args.addAll(f.accountIds.sorted()); args.addAll(f.accountIds.sorted())
+    }
+    f.dateFrom?.let { clauses += "date>=?"; args += it }
+    f.dateTo?.let { clauses += "date<=?"; args += it }
+    val order = when (f.sort) {
+      SortOrder.NEWEST -> "date DESC,created_at DESC,id DESC"
+      SortOrder.OLDEST -> "date ASC,created_at ASC,id ASC"
+      SortOrder.LARGEST -> "amount DESC,date DESC,created_at DESC,id DESC"
+      SortOrder.SMALLEST -> "amount ASC,date DESC,created_at DESC,id DESC"
+    }
+    // Unicode-aware search uses the existing Kotlin matcher off the UI thread.
+    // Do not limit before searching: an old matching entry must remain discoverable.
+    val bound = if (f.search.isBlank()) " LIMIT ?" else ""
+    if (bound.isNotEmpty()) args += limit.coerceAtLeast(1)
+    return androidx.sqlite.db.SimpleSQLiteQuery("SELECT * FROM transactions WHERE ${clauses.joinToString(" AND ")} ORDER BY $order$bound", args.toTypedArray())
+  }
+
   /** Number of active filter groups, for the FILTERS badge. */
   fun activeCount(f: TransactionFilterState): Int {
     var count = 0
@@ -66,15 +101,28 @@ object TransactionFiltering {
           (f.currencyIds.isEmpty() || tx.currencyId in f.currencyIds) &&
           (f.dateFrom == null || tx.date >= f.dateFrom) &&
           (f.dateTo == null || tx.date <= f.dateTo) &&
-          (f.search.isBlank() ||
-            tx.title?.contains(f.search, ignoreCase = true) == true ||
-            tx.notes?.contains(f.search, ignoreCase = true) == true ||
-            item.categoryName.contains(f.search, ignoreCase = true) ||
-            item.accountName?.contains(f.search, ignoreCase = true) == true ||
-            item.destinationAccountName?.contains(f.search, ignoreCase = true) == true)
+          matchesSearch(item, f.search)
       }
       .sortedWith(sortComparator(f.sort))
       .toList()
+
+  /** Each word can match a different field: e.g. "cash coffee 12.50". */
+  internal fun matchesSearch(item: TransactionListItem, query: String): Boolean {
+    val tx = item.transaction
+    val fields = listOfNotNull(tx.title, tx.notes, item.categoryName, item.accountName,
+      item.destinationAccountName, item.currencyCode, item.currencySymbol, tx.type.name,
+      if (tx.type == TransactionType.GOAL) "expense goal" else null, tx.date)
+    val decimal = java.math.BigDecimal.valueOf(tx.amount, 2).toPlainString()
+    val short = java.math.BigDecimal.valueOf(tx.amount, 2).stripTrailingZeros().toPlainString()
+    val signed = (if (tx.type == TransactionType.INCOME) "+" else if (tx.type == TransactionType.TRANSFER) "" else "-") + decimal
+    val amountFields = listOf(decimal, short, signed, decimal.replace('.', ','),
+      com.joeabouserhal.financetracker.utils.Money.format(tx.amount, item.currencySymbol),
+      item.currencySymbol + decimal)
+    return query.trim().split(Regex("\\s+")).filter { it.isNotBlank() }.all { word ->
+      fields.any { it.contains(word, ignoreCase = true) } ||
+        amountFields.any { it.contains(word, ignoreCase = true) }
+    }
+  }
 
   /** Groups preserving sort order; each pair is (date, items). */
   fun groupByDate(items: List<TransactionListItem>): List<Pair<String, List<TransactionListItem>>> =

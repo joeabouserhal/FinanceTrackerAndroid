@@ -105,7 +105,7 @@ fun TransactionRow(
           Icon(painterResource(R.drawable.ic_transfer), contentDescription = "Transfer",
             tint = amountColor, modifier = Modifier.size(18.dp))
         }
-        Text(
+        com.joeabouserhal.financetracker.ui.components.PrivateAmount(
           text = compactCurrencyText(
             tx.amount,
             item.currencySymbol,

@@ -5,12 +5,37 @@ import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import androidx.room.Update
+import androidx.room.Upsert
+import androidx.room.RawQuery
+import androidx.sqlite.db.SupportSQLiteQuery
 import com.joeabouserhal.financetracker.data.local.entities.TransactionEntity
 import com.joeabouserhal.financetracker.data.local.entities.TransactionType
 import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface TransactionDao {
+  @RawQuery(observedEntities = [TransactionEntity::class])
+  fun observePage(query: SupportSQLiteQuery): Flow<List<TransactionEntity>>
+  @Query("""
+    SELECT accountId, currencyId, SUM(net) AS balanceMinor FROM (
+      SELECT id AS accountId, currency_id AS currencyId, opening_balance AS net
+      FROM accounts WHERE owner_id=:ownerId AND deleted_at IS NULL
+      UNION ALL
+      SELECT account_id AS accountId, currency_id AS currencyId,
+        CASE WHEN type='INCOME' THEN amount ELSE -amount END AS net
+      FROM transactions WHERE owner_id=:ownerId AND deleted_at IS NULL
+      UNION ALL
+      SELECT destination_account_id AS accountId, currency_id AS currencyId, amount AS net
+      FROM transactions WHERE owner_id=:ownerId AND deleted_at IS NULL AND type='TRANSFER'
+    ) GROUP BY accountId,currencyId
+  """)
+  fun observeAccountNets(ownerId: String): Flow<List<AccountNetRow>>
+
+  @Query("SELECT DISTINCT currency_id FROM transactions WHERE owner_id=:ownerId AND deleted_at IS NULL")
+  fun observeUsedCurrencies(ownerId: String): Flow<List<String>>
+
+  @Query("SELECT * FROM transactions WHERE owner_id=:ownerId AND deleted_at IS NULL AND (account_id=:accountId OR destination_account_id=:accountId) ORDER BY date DESC,created_at DESC")
+  fun observeForAccount(ownerId: String, accountId: String): Flow<List<TransactionEntity>>
   @Query("SELECT * FROM transactions WHERE owner_id = :ownerId AND deleted_at IS NULL ORDER BY date DESC, created_at DESC")
   fun observeAll(ownerId: String): Flow<List<TransactionEntity>>
 
@@ -38,10 +63,16 @@ interface TransactionDao {
   @Query("SELECT COUNT(*) FROM transactions WHERE owner_id = :ownerId AND deleted_at IS NULL AND (account_id = :accountId OR destination_account_id = :accountId)")
   suspend fun countByAccount(ownerId: String, accountId: String): Int
 
-  @Insert(onConflict = OnConflictStrategy.REPLACE)
+  @Query("SELECT COUNT(*) FROM transactions WHERE owner_id=:ownerId AND currency_id=:currencyId AND deleted_at IS NULL")
+  suspend fun countByCurrency(ownerId: String, currencyId: String): Int
+
+  @Query("SELECT * FROM transactions WHERE owner_id=:ownerId AND recurrence_occurrence_id=:occurrenceId AND recurrence_generation=:generation ORDER BY created_at, id LIMIT 1")
+  suspend fun findRecurring(ownerId: String, occurrenceId: String, generation: Int): TransactionEntity?
+
+  @Upsert
   suspend fun upsert(entity: TransactionEntity)
 
-  @Insert(onConflict = OnConflictStrategy.REPLACE)
+  @Upsert
   suspend fun upsertAll(entities: List<TransactionEntity>)
 
   /** Sync pull inserts: never replace (REPLACE cascades to child tables). */
@@ -82,3 +113,5 @@ interface TransactionDao {
   @Query("DELETE FROM transactions WHERE owner_id = :ownerId AND id = :id")
   suspend fun delete(ownerId: String, id: String)
 }
+
+data class AccountNetRow(val accountId: String?, val currencyId: String, val balanceMinor: Long)

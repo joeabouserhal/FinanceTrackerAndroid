@@ -21,13 +21,17 @@ class RecurringScheduler(private val context: Context, private val repository: R
     val snoozed = repository.nextSnooze(ownerId)
     val target = listOfNotNull(regular, snoozed).minOrNull() ?: run { cancel(); return }
     val delay = Duration.between(now, target).toMillis().coerceAtLeast(0)
-    val request = OneTimeWorkRequestBuilder<RecurringWorker>().setInitialDelay(delay, TimeUnit.MILLISECONDS).build()
-    workManager.enqueueUniqueWork(WORK_NAME, ExistingWorkPolicy.REPLACE, request)
+    val request = OneTimeWorkRequestBuilder<RecurringWorker>()
+      .setInputData(androidx.work.workDataOf("timer" to true))
+      .setInitialDelay(delay, TimeUnit.MILLISECONDS).build()
+    // The wake-up and the processor have separate identities. A running processor
+    // must not cancel itself when it schedules tomorrow's wake-up.
+    workManager.enqueueUniqueWork(WAKE_NAME, ExistingWorkPolicy.REPLACE, request)
   }
 
   fun requestNow() {
-    workManager.enqueueUniqueWork(WORK_NAME, ExistingWorkPolicy.REPLACE, OneTimeWorkRequestBuilder<RecurringWorker>().build())
+    workManager.enqueueUniqueWork(WORK_NAME, ExistingWorkPolicy.APPEND_OR_REPLACE, OneTimeWorkRequestBuilder<RecurringWorker>().build())
   }
-  fun cancel() = workManager.cancelUniqueWork(WORK_NAME)
-  companion object { const val WORK_NAME = "recurring_transactions" }
+  fun cancel() { workManager.cancelUniqueWork(WAKE_NAME) }
+  companion object { const val WORK_NAME = "recurring_transactions"; private const val WAKE_NAME = "recurring_wake" }
 }

@@ -1,6 +1,6 @@
 package com.joeabouserhal.financetracker.data.repositories
 
-import androidx.room.withTransaction
+import com.joeabouserhal.financetracker.data.local.withMutation
 import com.joeabouserhal.financetracker.data.local.AppDatabase
 import com.joeabouserhal.financetracker.data.local.OutboxWriter
 import com.joeabouserhal.financetracker.data.local.dao.ProfileDao
@@ -33,7 +33,7 @@ class ProfileRepository(
         updatedAt = now,
         createdAt = existing?.createdAt?.takeIf { it.isNotBlank() } ?: now,
       )
-    db.withTransaction {
+    db.withMutation {
       dao.upsert(entity)
       OutboxWriter.enqueue(db, ownerId, "profiles", OutboxAction.UPDATE, OutboxWriter.profile(ownerId, entity))
     }

@@ -41,6 +41,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.joeabouserhal.financetracker.data.local.entities.PresetEntity
+import com.joeabouserhal.financetracker.data.local.withMutation
 import com.joeabouserhal.financetracker.data.local.entities.TransactionType
 import com.joeabouserhal.financetracker.data.local.entities.RecurrenceFrequency
 import com.joeabouserhal.financetracker.data.local.entities.MonthlyRule
@@ -124,9 +125,12 @@ fun PresetsScreen(
       onSave = { name, amount, currencyId, accountId, categoryId, presetType, recurrence ->
         scope.launch {
           try {
-            val preset = container.presetRepository.add(ownerId, name, presetType, amount, currencyId, categoryId, accountId)
-            recurrence?.let {
-              container.recurringRepository.saveSchedule(ownerId, preset.id, it); container.recurringScheduler.requestNow()
+            container.appDatabase.withMutation {
+              val preset = container.presetRepository.add(ownerId, name, presetType, amount, currencyId, categoryId, accountId)
+              recurrence?.let { container.recurringRepository.saveSchedule(ownerId, preset.id, it) }
+            }
+            if (recurrence != null) {
+              container.recurringScheduler.requestNow()
               if (Build.VERSION.SDK_INT >= 33 && ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED) notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
             }
             adding = false
@@ -151,12 +155,15 @@ fun PresetsScreen(
       onSave = { name, amount, currencyId, accountId, categoryId, _, recurrence ->
         scope.launch {
           try {
-            container.presetRepository.update(ownerId, preset.id, name, amount, currencyId, categoryId, accountId)
+            container.appDatabase.withMutation {
+              container.presetRepository.update(ownerId, preset.id, name, amount, currencyId, categoryId, accountId)
+              if (recurrence != null) container.recurringRepository.saveSchedule(ownerId, preset.id, recurrence)
+              else schedules.firstOrNull { it.presetId == preset.id }?.let { container.recurringRepository.setPaused(ownerId, it.id, true) }
+            }
             if (recurrence != null) {
-              container.recurringRepository.saveSchedule(ownerId, preset.id, recurrence)
               container.recurringScheduler.requestNow()
               if (Build.VERSION.SDK_INT >= 33 && ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED) notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
-            } else schedules.firstOrNull { it.presetId == preset.id }?.let { container.recurringRepository.setPaused(ownerId, it.id, true) }
+            }
             editing = null
             error = null
           } catch (e: Exception) { error = e.message }
@@ -175,7 +182,6 @@ fun PresetsScreen(
         scope.launch {
           try {
             container.presetRepository.archive(ownerId, preset.id)
-            schedules.firstOrNull { it.presetId == preset.id }?.let { container.recurringRepository.setPaused(ownerId, it.id, true) }
             container.recurringScheduler.requestNow()
             archiving = null
             editing = null

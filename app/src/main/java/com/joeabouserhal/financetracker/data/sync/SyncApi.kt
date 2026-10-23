@@ -10,6 +10,8 @@ import kotlinx.serialization.json.JsonObject
  * keyset-paginate with the (updated_at, key) watermark stored in sync_meta.
  */
 interface SyncApi {
+  /** Implementations must commit the entire logical action or none of it. */
+  suspend fun applyBatch(operations: List<com.joeabouserhal.financetracker.data.local.entities.OutboxEntity>): List<MutationResult?>
   /** True when a usable authenticated session is available (refreshing if needed). */
   suspend fun ensureAuthenticated(): Boolean
 
@@ -83,9 +85,9 @@ object SyncTables {
       Spec("accounts", "id"),
       Spec("presets", "id"),
       Spec("recurring_schedules", "id"),
-      Spec("recurring_occurrences", "id"),
       Spec("goals", "id"),
       Spec("transactions", "id"),
+      Spec("recurring_occurrences", "id"),
       Spec("profiles", "user_id"),
     )
 }

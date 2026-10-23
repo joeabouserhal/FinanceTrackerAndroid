@@ -5,6 +5,7 @@ import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import androidx.room.Update
+import androidx.room.Upsert
 import com.joeabouserhal.financetracker.data.local.entities.PresetEntity
 import com.joeabouserhal.financetracker.data.local.entities.TransactionType
 import kotlinx.coroutines.flow.Flow
@@ -23,10 +24,10 @@ interface PresetDao {
   @Query("SELECT * FROM presets WHERE owner_id = :ownerId AND id = :id")
   suspend fun getById(ownerId: String, id: String): PresetEntity?
 
-  @Insert(onConflict = OnConflictStrategy.REPLACE)
+  @Upsert
   suspend fun upsert(entity: PresetEntity)
 
-  @Insert(onConflict = OnConflictStrategy.REPLACE)
+  @Upsert
   suspend fun upsertAll(entities: List<PresetEntity>)
 
   /** Sync pull inserts: never replace (REPLACE cascades to child tables). */

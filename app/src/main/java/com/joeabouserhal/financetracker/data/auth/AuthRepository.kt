@@ -26,6 +26,28 @@ class AuthRepository(private val api: AuthApi?) {
     api?.signOut()
   }
 
+  suspend fun requestPasswordReset(email: String): AuthActionResult {
+    val clean = email.trim()
+    if (!Regex("^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$").matches(clean)) return AuthActionResult.Error("Enter a valid email address.")
+    return action { it.requestPasswordReset(clean) }
+  }
+
+  suspend fun openPasswordRecovery(link: String): AuthActionResult = action { it.openPasswordRecovery(PasswordRecovery.code(link)) }
+
+  suspend fun updateRecoveredPassword(password: String, confirmation: String): AuthActionResult {
+    PasswordRecovery.validatePassword(password, confirmation)?.let { return AuthActionResult.Error(it) }
+    return action { it.updateRecoveredPassword(password) }
+  }
+
+  suspend fun clearRecovery() { api?.clearRecovery() }
+
+  private suspend fun action(block: suspend (AuthApi) -> Unit): AuthActionResult {
+    val configured = api ?: return AuthActionResult.Error("Supabase is not configured.")
+    return try { block(configured); AuthActionResult.Success }
+    catch (e: kotlinx.coroutines.CancellationException) { throw e }
+    catch (e: Exception) { AuthActionResult.Error(mapError(e)) }
+  }
+
   private suspend fun call(block: suspend () -> String?): AuthResult {
     if (api == null) {
       return AuthResult.Error("Supabase is not configured yet — check supabase/README.md")
@@ -34,6 +56,8 @@ class AuthRepository(private val api: AuthApi?) {
       val userId = block()
       if (userId.isNullOrBlank()) AuthResult.Error("Authentication failed — no user returned")
       else AuthResult.Success(userId)
+    } catch (e: kotlinx.coroutines.CancellationException) {
+      throw e
     } catch (e: Exception) {
       AuthResult.Error(mapError(e))
     }

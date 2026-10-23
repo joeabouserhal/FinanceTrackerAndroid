@@ -5,6 +5,7 @@ import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import androidx.room.Update
+import androidx.room.Upsert
 import com.joeabouserhal.financetracker.data.local.entities.CurrencyEntity
 import kotlinx.coroutines.flow.Flow
 
@@ -19,10 +20,10 @@ interface CurrencyDao {
   @Query("SELECT * FROM currencies WHERE owner_id = :ownerId AND id = :id")
   suspend fun getById(ownerId: String, id: String): CurrencyEntity?
 
-  @Insert(onConflict = OnConflictStrategy.REPLACE)
+  @Upsert
   suspend fun upsert(entity: CurrencyEntity)
 
-  @Insert(onConflict = OnConflictStrategy.REPLACE)
+  @Upsert
   suspend fun upsertAll(entities: List<CurrencyEntity>)
 
   /** Sync pull inserts: never replace (REPLACE cascades to child tables). */

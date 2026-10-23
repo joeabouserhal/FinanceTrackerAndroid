@@ -9,25 +9,56 @@ import java.time.temporal.ChronoUnit
 
 /** Pure calendar rules used by the UI preview and the durable worker. */
 object RecurrenceCalculator {
-  fun occurrences(schedule: RecurringScheduleEntity, through: LocalDate): Sequence<LocalDate> = sequence {
-    val start = LocalDate.parse(schedule.startDate)
+  fun occurrences(schedule: RecurringScheduleEntity, through: LocalDate, from: LocalDate = LocalDate.parse(schedule.startDate)): Sequence<LocalDate> = sequence {
     val end = schedule.endDate?.let(LocalDate::parse)?.coerceAtMost(through) ?: through
-    var date = start
-    while (!date.isAfter(end)) {
-      if (matches(schedule, date, start)) yield(date)
-      date = date.plusDays(1)
+    var date = next(schedule, from)
+    while (date != null && !date.isAfter(end)) {
+      yield(date)
+      date = next(schedule, date.plusDays(1))
     }
   }
 
   fun next(schedule: RecurringScheduleEntity, from: LocalDate): LocalDate? {
+    require(schedule.interval > 0)
+    val start = LocalDate.parse(schedule.startDate)
     val end = schedule.endDate?.let(LocalDate::parse)
-    var date = maxOf(LocalDate.parse(schedule.startDate), from)
-    repeat(366 * 12) {
-      if (end != null && date.isAfter(end)) return null
-      if (matches(schedule, date, LocalDate.parse(schedule.startDate))) return date
-      date = date.plusDays(1)
+    val floor = maxOf(start, from)
+    val candidate = when (schedule.frequency) {
+      com.joeabouserhal.financetracker.data.local.entities.RecurrenceFrequency.DAILY -> {
+        val elapsed = ChronoUnit.DAYS.between(start, floor)
+        start.plusDays(((elapsed + schedule.interval - 1) / schedule.interval) * schedule.interval)
+      }
+      com.joeabouserhal.financetracker.data.local.entities.RecurrenceFrequency.WEEKLY -> {
+        val week = ChronoUnit.WEEKS.between(start, floor)
+        var date = start.plusWeeks((week / schedule.interval) * schedule.interval)
+        // At most one partial cycle plus the next selected week is inspected.
+        while (true) {
+          val found = (0L..6L).map { date.plusDays(it) }.firstOrNull { it >= floor && matches(schedule, it, start) }
+          if (found != null) { date = found; break }
+          date = date.plusWeeks(schedule.interval.toLong())
+        }
+        date
+      }
+      com.joeabouserhal.financetracker.data.local.entities.RecurrenceFrequency.MONTHLY -> {
+        val months = ChronoUnit.MONTHS.between(YearMonth.from(start), YearMonth.from(floor))
+        var month = YearMonth.from(start).plusMonths((months / schedule.interval) * schedule.interval)
+        var found: LocalDate? = null
+        // Gregorian weekday patterns repeat within 400 years, even for sparse intervals.
+        for (cycle in 0 until 4800) {
+          found = (1..month.lengthOfMonth()).asSequence().map { month.atDay(it) }.firstOrNull { it >= floor && matchesMonthRule(schedule, it) }
+          if (found != null) break
+          month = month.plusMonths(schedule.interval.toLong())
+        }
+        found ?: return null
+      }
+      com.joeabouserhal.financetracker.data.local.entities.RecurrenceFrequency.YEARLY -> {
+        var year = start.year + ((floor.year - start.year) / schedule.interval) * schedule.interval
+        fun dateInYear() = YearMonth.of(year, start.monthValue).atDay(minOf(start.dayOfMonth, YearMonth.of(year, start.monthValue).lengthOfMonth()))
+        if (dateInYear() < floor) year += schedule.interval
+        dateInYear()
+      }
     }
-    return null
+    return candidate.takeIf { end == null || it <= end }
   }
 
   private fun matches(s: RecurringScheduleEntity, date: LocalDate, start: LocalDate): Boolean = when (s.frequency) {
@@ -35,7 +66,7 @@ object RecurrenceCalculator {
       ChronoUnit.DAYS.between(start, date) % s.interval == 0L
     com.joeabouserhal.financetracker.data.local.entities.RecurrenceFrequency.WEEKLY -> {
       val weeks = ChronoUnit.WEEKS.between(start, date)
-      val days = s.weekDays.orEmpty().split(',').mapNotNull { it.toIntOrNull() }.toSet().ifEmpty { setOf(start.dayOfWeek.value) }
+      val days = s.weekDays.orEmpty().split(',').mapNotNull { it.toIntOrNull() }.filter { it in 1..7 }.toSet().ifEmpty { setOf(start.dayOfWeek.value) }
       weeks >= 0 && weeks % s.interval == 0L && date.dayOfWeek.value in days
     }
     com.joeabouserhal.financetracker.data.local.entities.RecurrenceFrequency.MONTHLY -> {

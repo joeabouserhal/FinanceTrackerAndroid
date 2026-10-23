@@ -19,6 +19,9 @@ data class SyncStatus(
   val actionRequiredCount: Int = 0,
   val lastError: String? = null,
   val errorKind: String? = null,
+  val lastPushAt: String? = null,
+  val lastPullAt: String? = null,
+  val conflictsResolved: Int = 0,
 )
 
 @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
@@ -50,6 +53,7 @@ class SyncStatusRepository(
           actionRequiredCount = pending.count { it.errorKind in setOf("ACTION_REQUIRED", "AUTH_REQUIRED") },
           lastError = pending.firstOrNull { it.lastError != null }?.lastError ?: health?.lastError,
           errorKind = pending.firstOrNull { it.errorKind != null }?.errorKind ?: health?.errorKind,
+          lastPushAt = health?.lastPushAt, lastPullAt = health?.lastPullAt, conflictsResolved = health?.conflictsResolved ?: 0,
         )
       }
     }

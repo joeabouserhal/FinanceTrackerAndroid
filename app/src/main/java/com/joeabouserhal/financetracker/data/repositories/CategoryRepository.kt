@@ -1,6 +1,6 @@
 package com.joeabouserhal.financetracker.data.repositories
 
-import androidx.room.withTransaction
+import com.joeabouserhal.financetracker.data.local.withMutation
 import com.joeabouserhal.financetracker.data.local.AppDatabase
 import com.joeabouserhal.financetracker.data.local.OutboxWriter
 import com.joeabouserhal.financetracker.data.local.dao.CategoryDao
@@ -56,7 +56,7 @@ class CategoryRepository(
         createdAt = now,
         updatedAt = now,
       )
-    db.withTransaction {
+    db.withMutation {
       dao.upsert(entity)
       OutboxWriter.enqueue(db, ownerId, "categories", OutboxAction.INSERT, OutboxWriter.category(ownerId, entity))
     }
@@ -70,7 +70,12 @@ class CategoryRepository(
     ) {
       "A category named \"${name.trim()}\" already exists"
     }
-    db.withTransaction {
+    db.withMutation {
+      val current = dao.getById(ownerId, id)
+      require(current != null && current.deletedAt == null) { "This category no longer exists" }
+      if (current.type != type) {
+        require(db.transactionDao().getAll(ownerId).none { it.categoryId == id } && db.presetDao().getAll(ownerId).none { it.defaultCategoryId == id }) { "A category in use cannot change transaction type" }
+      }
       dao.update(ownerId, id, name.trim(), type, color.ifBlank { "#77746C" }, java.time.Instant.now().toString())
       dao.getById(ownerId, id)?.let { full ->
         OutboxWriter.enqueue(db, ownerId, "categories", OutboxAction.UPDATE, OutboxWriter.category(ownerId, full))
@@ -90,7 +95,7 @@ class CategoryRepository(
     val other = dao.getDefaultOther(ownerId, category.type)
       ?: throw IllegalStateException("Missing default 'Other' category")
 
-    db.withTransaction {
+    db.withMutation {
       val now = java.time.Instant.now().toString()
       val affected = db.transactionDao().getAll(ownerId).filter { it.categoryId == id }
       dao.reassignTransactions(ownerId, id, other.id, now)

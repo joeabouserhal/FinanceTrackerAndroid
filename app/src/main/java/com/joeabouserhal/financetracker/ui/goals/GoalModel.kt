@@ -42,12 +42,13 @@ internal fun buildProgress(
   val netByCurrency = transactions.groupBy { it.currencyId }.mapValues { (_, rows) -> rows.sumOf { it.netAmount() } }
   return goals.map { goal ->
     GoalProgress(goal, currencyById[goal.currencyId], accountById[goal.accountId],
-      if (goal.accountId != null) netByAccount[goal.accountId] ?: 0 else netByCurrency[goal.currencyId] ?: 0)
+      if (goal.accountId != null) netByAccount[goal.accountId] ?: 0 else
+        (netByCurrency[goal.currencyId] ?: 0) + accounts.filter { it.currencyId == goal.currencyId && it.deletedAt == null }.sumOf { it.openingBalanceMinor })
   }
 }
 
 internal fun buildAccountBalances(transactions: List<TransactionEntity>, accounts: List<AccountEntity>): Map<String, Long> {
-  val net = accountBalanceMap(transactions)
+  val net = accountBalanceMap(transactions, accounts)
   return accounts.associate { it.id to (net[it.id] ?: 0L) }
 }
 
@@ -60,8 +61,8 @@ internal fun textToMinor(text: String): Long = if (text.isBlank()) 0 else try {
 /** No silent wraparound when several individually valid amounts exceed Long.MAX_VALUE. */
 internal fun allocationTotal(values: Collection<Long>): Long? {
   if (values.any { it < 0 }) return null
-  return try { values.fold(BigInteger.ZERO) { sum, value -> sum + BigInteger.valueOf(value) }.longValueExact() }
-  catch (_: ArithmeticException) { null }
+  val total = values.fold(BigInteger.ZERO) { sum, value -> sum + BigInteger.valueOf(value) }
+  return if (total <= BigInteger.valueOf(Long.MAX_VALUE)) total.toLong() else null
 }
 
 /** Suggest a split using positive balances, default account first; never invent an overdraft. */

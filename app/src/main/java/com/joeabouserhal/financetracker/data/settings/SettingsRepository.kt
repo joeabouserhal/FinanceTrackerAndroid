@@ -5,6 +5,7 @@ import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.core.stringPreferencesKey
+import androidx.datastore.preferences.core.booleanPreferencesKey
 import java.io.IOException
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.catch
@@ -17,7 +18,14 @@ class SettingsRepository(private val dataStore: DataStore<Preferences>) {
     val THEME_MODE = stringPreferencesKey("theme_mode")
     val THEME_SPEC_ID = stringPreferencesKey("theme_spec_id")
     val CUSTOM_COLOR_HISTORY = stringPreferencesKey("custom_color_history")
+    val AMOUNTS_HIDDEN = booleanPreferencesKey("amounts_hidden")
   }
+
+  val amountsHidden: Flow<Boolean> = dataStore.data
+    .catch { if (it is IOException) emit(emptyPreferences()) else throw it }
+    .map { it[Keys.AMOUNTS_HIDDEN] ?: false }
+
+  suspend fun setAmountsHidden(hidden: Boolean) { dataStore.edit { it[Keys.AMOUNTS_HIDDEN] = hidden } }
 
   val themeSelection: Flow<ThemeSelection> =
     dataStore.data

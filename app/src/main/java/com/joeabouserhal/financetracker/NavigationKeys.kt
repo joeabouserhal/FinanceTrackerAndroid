@@ -10,7 +10,7 @@ import kotlinx.serialization.Serializable
 @Serializable data object AuthFlow : NavKey
 
 /** Add a new transaction (optionally pre-filled from a preset). */
-@Serializable data class AddTransaction(val presetId: String? = null) : NavKey
+@Serializable data class AddTransaction(val presetId: String? = null, val duplicateId: String? = null) : NavKey
 
 @Serializable data object AddTransfer : NavKey
 
@@ -25,6 +25,9 @@ import kotlinx.serialization.Serializable
 
 /** Theme picker (pushed from Options). */
 @Serializable data object Themes : NavKey
+
+/** Device-only biometric lock settings (pushed from Options). */
+@Serializable data object AppLock : NavKey
 
 /** Category management (pushed from Options). */
 @Serializable data object Categories : NavKey

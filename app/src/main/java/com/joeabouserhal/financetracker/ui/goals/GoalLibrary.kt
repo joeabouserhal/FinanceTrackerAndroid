@@ -93,7 +93,7 @@ internal fun GoalCard(
     }
     Column(Modifier.padding(start = 12.dp, end = 12.dp, bottom = 8.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
       Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text(buildAnnotatedString {
+        com.joeabouserhal.financetracker.ui.components.PrivateAmount(buildAnnotatedString {
           append(compactCurrencyText(if (completed) progress.goal.targetMinor else progress.progressMinor, symbol))
           withStyle(SpanStyle(color = spec.muted, fontSize = MaterialTheme.typography.bodySmall.fontSize)) {
             if (completed) append(" achieved") else {

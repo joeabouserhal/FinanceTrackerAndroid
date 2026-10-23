@@ -23,6 +23,7 @@ DROP FUNCTION IF EXISTS handle_new_user();
 DROP TABLE IF EXISTS transactions CASCADE;
 DROP TABLE IF EXISTS goals CASCADE;
 DROP TABLE IF EXISTS sync_operations CASCADE;
+DROP TABLE IF EXISTS sync_batches CASCADE;
 DROP TABLE IF EXISTS sync_deleted_records CASCADE;
 DROP TABLE IF EXISTS presets CASCADE;
 DROP TABLE IF EXISTS accounts CASCADE;
@@ -73,6 +74,7 @@ CREATE TABLE accounts (
   name        VARCHAR(100) NOT NULL,           -- e.g. 'Cash', 'Card'
   archived    BOOLEAN DEFAULT false,
   is_default  BOOLEAN NOT NULL DEFAULT false,
+  opening_balance BIGINT NOT NULL DEFAULT 0, -- Starting funds (minor units), not income.
   created_at  TIMESTAMPTZ DEFAULT now(),
   updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
   sync_version TEXT NOT NULL DEFAULT '',
@@ -323,6 +325,7 @@ $$;
 CREATE TRIGGER on_auth_user_created
   AFTER INSERT ON auth.users
   FOR EACH ROW EXECUTE FUNCTION handle_new_user();
+REVOKE ALL ON FUNCTION public.handle_new_user() FROM PUBLIC,anon,authenticated;
 
 -- =============================================================================
 -- 7. Verification queries (run after, one at a time)
@@ -455,7 +458,7 @@ BEGIN
   ELSE
     v_data := jsonb_build_object(
       'created_at',clock_timestamp(),'updated_at',clock_timestamp(),
-      'is_default',false,'archived',false,'completed',false
+      'is_default',false,'archived',false,'completed',false,'generation',0,'recurrence_generation',0,'opening_balance',0
     ) || coalesce(v_row,'{}'::jsonb) || p_payload ||
       jsonb_build_object(v_key,v_id,'user_id',v_user,'sync_version',v_version);
     IF p_table<>'profiles' THEN v_data := v_data || jsonb_build_object('deleted_at',null); END IF;
@@ -525,6 +528,151 @@ $function$;
 REVOKE ALL ON FUNCTION public.apply_sync_mutation(text,text,jsonb,text,uuid) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.apply_sync_mutation(text,text,jsonb,text,uuid) TO authenticated;
 -- END SYNC REPAIR PROTOCOL
+-- Audit hardening: additive columns and constraints; existing finance rows are preserved.
+ALTER TABLE public.recurring_occurrences ADD COLUMN IF NOT EXISTS generation integer NOT NULL DEFAULT 0 CHECK (generation >= 0);
+ALTER TABLE public.transactions ADD COLUMN IF NOT EXISTS recurrence_generation integer NOT NULL DEFAULT 0 CHECK (recurrence_generation >= 0);
+CREATE UNIQUE INDEX IF NOT EXISTS transactions_recurring_generation_unique ON public.transactions(user_id,recurrence_occurrence_id,recurrence_generation) WHERE recurrence_occurrence_id IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS currencies_one_default ON public.currencies(user_id) WHERE is_default AND deleted_at IS NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS accounts_one_default ON public.accounts(user_id,currency_id) WHERE is_default AND NOT archived AND deleted_at IS NULL;
+
+-- Owner-aware references also protect direct authenticated table writes.
+DO $body$
+DECLARE r record; t text;
+BEGIN
+  FOREACH t IN ARRAY ARRAY['currencies','categories','accounts','presets','goals','recurring_schedules','recurring_occurrences','transactions'] LOOP
+    EXECUTE format('CREATE UNIQUE INDEX IF NOT EXISTS %I ON public.%I(user_id,id)',t||'_owner_identity',t);
+  END LOOP;
+  FOR r IN SELECT * FROM (VALUES
+    ('accounts','currency_id','currencies'),('goals','currency_id','currencies'),('goals','account_id','accounts'),
+    ('presets','default_currency_id','currencies'),('presets','default_category_id','categories'),('presets','default_account_id','accounts'),
+    ('transactions','currency_id','currencies'),('transactions','category_id','categories'),('transactions','account_id','accounts'),
+    ('transactions','destination_account_id','accounts'),('transactions','preset_id','presets'),('transactions','goal_id','goals'),
+    ('recurring_schedules','preset_id','presets'),('recurring_occurrences','schedule_id','recurring_schedules')
+  ) AS refs(child,col,parent) LOOP
+    IF NOT EXISTS(SELECT 1 FROM pg_constraint WHERE conname=r.child||'_'||r.col||'_owner_fk' AND conrelid=('public.'||r.child)::regclass) THEN
+      EXECUTE format('ALTER TABLE public.%I ADD CONSTRAINT %I FOREIGN KEY(user_id,%I) REFERENCES public.%I(user_id,id) DEFERRABLE INITIALLY DEFERRED NOT VALID',r.child,r.child||'_'||r.col||'_owner_fk',r.col,r.parent);
+      EXECUTE format('ALTER TABLE public.%I VALIDATE CONSTRAINT %I',r.child,r.child||'_'||r.col||'_owner_fk');
+    END IF;
+    EXECUTE format('CREATE INDEX IF NOT EXISTS %I ON public.%I(user_id,%I)',r.child||'_'||r.col||'_owner_idx',r.child,r.col);
+  END LOOP;
+END;
+$body$;
+
+CREATE TABLE IF NOT EXISTS public.sync_batches(
+  user_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  batch_id uuid NOT NULL,
+  operations jsonb NOT NULL,
+  result jsonb NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY(user_id,batch_id)
+);
+ALTER TABLE public.sync_batches ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.sync_batches FROM PUBLIC,anon;
+GRANT SELECT,INSERT ON public.sync_batches TO authenticated;
+CREATE POLICY sync_batches_owner_select ON public.sync_batches FOR SELECT TO authenticated USING ((select auth.uid())=user_id);
+CREATE POLICY sync_batches_owner_insert ON public.sync_batches FOR INSERT TO authenticated WITH CHECK ((select auth.uid())=user_id);
+
+CREATE OR REPLACE FUNCTION public.apply_sync_batch(p_batch_id uuid,p_operations jsonb)
+RETURNS jsonb LANGUAGE plpgsql SECURITY INVOKER SET search_path=''
+AS $function$
+DECLARE
+  u uuid := auth.uid(); op jsonb; p jsonb; r jsonb; row_data jsonb; seen public.sync_batches%ROWTYPE;
+  results jsonb := '[]'::jsonb; refreshed jsonb := '[]'::jsonb;
+  table_name text; key_name text; original_id uuid; actual_id uuid; ver text;
+  conflict boolean := false;
+BEGIN
+  IF u IS NULL THEN RAISE EXCEPTION USING ERRCODE='42501',MESSAGE='Sign in to sync'; END IF;
+  IF p_batch_id IS NULL OR jsonb_typeof(p_operations) IS DISTINCT FROM 'array'
+     OR jsonb_array_length(p_operations) NOT BETWEEN 1 AND 10000 THEN
+    RAISE EXCEPTION USING ERRCODE='22023',MESSAGE='Invalid sync batch';
+  END IF;
+  PERFORM pg_advisory_xact_lock(hashtextextended(u::text,0));
+  SELECT * INTO seen FROM public.sync_batches WHERE user_id=u AND batch_id=p_batch_id;
+  IF seen.batch_id IS NOT NULL AND seen.operations IS DISTINCT FROM p_operations THEN
+    RAISE EXCEPTION USING ERRCODE='22023',MESSAGE='Batch id reused with different operations';
+  END IF;
+
+  -- Check every envelope before any write. A stale compound action loses as a whole.
+  FOR op IN SELECT value FROM jsonb_array_elements(p_operations) LOOP
+    table_name := op->>'table'; p := op->'payload';
+    IF table_name IS NULL OR table_name NOT IN ('currencies','categories','accounts','presets','recurring_schedules','recurring_occurrences','goals','transactions','profiles')
+       OR op->>'action' IS NULL OR op->>'action' NOT IN ('insert','update','delete')
+       OR jsonb_typeof(p) IS DISTINCT FROM 'object' OR nullif(op->>'operation_id','')::uuid IS NULL THEN
+      RAISE EXCEPTION USING ERRCODE='22023',MESSAGE='Invalid batch operation';
+    END IF;
+    key_name := CASE WHEN table_name='profiles' THEN 'user_id' ELSE 'id' END;
+    original_id := nullif(p->>key_name,'')::uuid; ver := p->>'sync_version';
+    IF original_id IS NULL OR (table_name='profiles' AND original_id<>u)
+       OR (p ? 'user_id' AND (p->>'user_id')::uuid IS DISTINCT FROM u) THEN
+      RAISE EXCEPTION USING ERRCODE='42501',MESSAGE='Batch owner mismatch';
+    END IF;
+    IF ver IS NULL OR ver !~ '^[0-9]{19}-[0-9]{6}-[A-Za-z0-9-]+$' THEN
+      RAISE EXCEPTION USING ERRCODE='22023',MESSAGE='Invalid sync version';
+    END IF;
+    EXECUTE format('SELECT to_jsonb(t) FROM public.%I t WHERE user_id=$1 AND %I=$2',table_name,key_name) INTO row_data USING u,original_id;
+    IF seen.batch_id IS NULL AND table_name='recurring_occurrences' AND p->>'state'='posted' AND EXISTS(
+      SELECT 1 FROM public.recurring_schedules s JOIN public.presets pr ON pr.id=s.preset_id AND pr.user_id=s.user_id
+      WHERE s.user_id=u AND s.id=(p->>'schedule_id')::uuid
+        AND (s.paused OR s.deleted_at IS NOT NULL OR pr.archived OR pr.deleted_at IS NOT NULL)
+    ) THEN conflict := true; END IF;
+    IF seen.batch_id IS NULL AND (
+      coalesce(row_data->>'sync_version','')>ver OR
+      (op->>'action'<>'delete' AND (row_data->>'deleted_at' IS NOT NULL OR EXISTS(
+        SELECT 1 FROM public.sync_deleted_records WHERE user_id=u AND record_id=original_id AND sync_deleted_records.table_name=op->>'table'
+      )))
+    ) THEN conflict := true; END IF;
+  END LOOP;
+
+  IF seen.batch_id IS NOT NULL THEN results := seen.result->'results';
+  ELSE
+    FOR op IN SELECT value FROM jsonb_array_elements(p_operations) LOOP
+      table_name := op->>'table'; p := op->'payload';
+      key_name := CASE WHEN table_name='profiles' THEN 'user_id' ELSE 'id' END;
+      original_id := (p->>key_name)::uuid; actual_id := original_id;
+      -- Preserve pre-upgrade random IDs and converge concurrent offline posts.
+      IF table_name='transactions' AND p->>'recurrence_occurrence_id' IS NOT NULL AND op->>'action'<>'delete' THEN
+        SELECT id INTO actual_id FROM public.transactions WHERE user_id=u
+          AND recurrence_occurrence_id=(p->>'recurrence_occurrence_id')::uuid
+          AND recurrence_generation=coalesce((p->>'recurrence_generation')::integer,0);
+        actual_id := coalesce(actual_id,original_id);
+        p := jsonb_set(p,'{id}',to_jsonb(actual_id));
+      END IF;
+      IF table_name='recurring_occurrences' AND p->>'transaction_id' IS NOT NULL THEN
+        SELECT id INTO actual_id FROM public.transactions WHERE user_id=u AND recurrence_occurrence_id=original_id
+          AND recurrence_generation=coalesce((p->>'generation')::integer,0);
+        IF actual_id IS NOT NULL THEN p := jsonb_set(p,'{transaction_id}',to_jsonb(actual_id)); END IF;
+        actual_id := original_id;
+      END IF;
+      IF conflict THEN r := jsonb_build_object('status','superseded','row',null);
+      ELSE r := public.apply_sync_mutation(table_name,op->>'action',p,p->>'sync_version',(op->>'operation_id')::uuid);
+      END IF;
+      results := results || jsonb_build_array(r || jsonb_build_object('operation_id',op->>'operation_id','table',table_name,'id',original_id,'canonical_id',actual_id));
+    END LOOP;
+  END IF;
+
+  IF NOT conflict AND EXISTS(SELECT 1 FROM public.currencies c WHERE c.user_id=u AND c.deleted_at IS NULL)
+     AND NOT EXISTS(SELECT 1 FROM public.currencies c WHERE c.user_id=u AND c.deleted_at IS NULL AND c.is_default) THEN
+    RAISE EXCEPTION USING ERRCODE='23514',MESSAGE='A default currency is required';
+  END IF;
+  IF NOT conflict AND EXISTS(SELECT 1 FROM public.accounts a WHERE a.user_id=u AND a.deleted_at IS NULL AND NOT a.archived
+      GROUP BY a.currency_id HAVING count(*) FILTER (WHERE a.is_default)=0) THEN
+    RAISE EXCEPTION USING ERRCODE='23514',MESSAGE='Each active currency account group needs a default';
+  END IF;
+
+  -- Read winners after every operation, including implicit default changes.
+  FOR r IN SELECT value FROM jsonb_array_elements(results) LOOP
+    table_name := r->>'table'; key_name := CASE WHEN table_name='profiles' THEN 'user_id' ELSE 'id' END;
+    EXECUTE format('SELECT to_jsonb(t) FROM public.%I t WHERE user_id=$1 AND %I=$2',table_name,key_name)
+      INTO row_data USING u,(r->>'canonical_id')::uuid;
+    refreshed := refreshed || jsonb_build_array(r || jsonb_build_object('row',row_data));
+  END LOOP;
+  r := jsonb_build_object('protocol',3,'batch_id',p_batch_id,'results',refreshed);
+  IF seen.batch_id IS NULL THEN INSERT INTO public.sync_batches(user_id,batch_id,operations,result) VALUES(u,p_batch_id,p_operations,r); END IF;
+  RETURN r;
+END;
+$function$;
+REVOKE ALL ON FUNCTION public.apply_sync_batch(uuid,jsonb) FROM PUBLIC,anon;
+GRANT EXECUTE ON FUNCTION public.apply_sync_batch(uuid,jsonb) TO authenticated;
 
 -- Same-currency transfers. One transaction records both account legs.
 BEGIN;
@@ -570,6 +718,9 @@ CREATE TRIGGER validate_transaction_transfer BEFORE INSERT OR UPDATE ON public.t
 CREATE OR REPLACE FUNCTION public.preserve_transfer_account_currency()
 RETURNS trigger LANGUAGE plpgsql SET search_path = '' AS $$
 BEGIN
+  IF NEW.currency_id IS DISTINCT FROM OLD.currency_id AND (OLD.opening_balance<>0 OR NEW.opening_balance<>0) THEN
+    RAISE EXCEPTION USING ERRCODE='23514', MESSAGE='An account with an opening balance cannot change currency';
+  END IF;
   IF NEW.currency_id IS DISTINCT FROM OLD.currency_id AND EXISTS (
     SELECT 1 FROM public.transactions WHERE user_id=NEW.user_id AND type='transfer' AND deleted_at IS NULL
     AND (account_id=NEW.id OR destination_account_id=NEW.id)
@@ -583,3 +734,62 @@ REVOKE EXECUTE ON FUNCTION public.preserve_transfer_account_currency() FROM PUBL
 CREATE TRIGGER preserve_transfer_currency BEFORE UPDATE OF currency_id ON public.accounts
   FOR EACH ROW EXECUTE FUNCTION public.preserve_transfer_account_currency();
 COMMIT;
+
+-- Deferred lineage constraints allow a posting and its occurrence to commit together.
+ALTER TABLE public.transactions ADD CONSTRAINT transactions_occurrence_owner_fk FOREIGN KEY(user_id,recurrence_occurrence_id) REFERENCES public.recurring_occurrences(user_id,id) DEFERRABLE INITIALLY DEFERRED NOT VALID;
+ALTER TABLE public.transactions VALIDATE CONSTRAINT transactions_occurrence_owner_fk;
+ALTER TABLE public.recurring_occurrences ADD CONSTRAINT recurring_occurrences_transaction_owner_fk FOREIGN KEY(user_id,transaction_id) REFERENCES public.transactions(user_id,id) DEFERRABLE INITIALLY DEFERRED NOT VALID;
+ALTER TABLE public.recurring_occurrences VALIDATE CONSTRAINT recurring_occurrences_transaction_owner_fk;
+CREATE INDEX IF NOT EXISTS transactions_occurrence_owner_idx ON public.transactions(user_id,recurrence_occurrence_id);
+CREATE INDEX IF NOT EXISTS recurring_occurrences_transaction_owner_idx ON public.recurring_occurrences(user_id,transaction_id);
+
+CREATE OR REPLACE FUNCTION public.validate_finance_links() RETURNS trigger LANGUAGE plpgsql SECURITY INVOKER SET search_path=''
+AS $function$
+DECLARE r jsonb; v_currency_id uuid; v_account_id uuid; v_category_id uuid; actual_currency uuid; category_type text; t text:=TG_TABLE_NAME;
+BEGIN
+  EXECUTE format('SELECT to_jsonb(t) FROM public.%I t WHERE user_id=$1 AND id=$2',t) INTO r USING NEW.user_id,NEW.id;
+  IF r IS NULL THEN RETURN NULL; END IF;
+  IF t='currencies' AND r->>'deleted_at' IS NOT NULL THEN
+    IF EXISTS(SELECT 1 FROM public.transactions WHERE user_id=NEW.user_id AND transactions.currency_id=NEW.id AND deleted_at IS NULL)
+       OR EXISTS(SELECT 1 FROM public.accounts WHERE user_id=NEW.user_id AND accounts.currency_id=NEW.id AND deleted_at IS NULL)
+       OR EXISTS(SELECT 1 FROM public.goals WHERE user_id=NEW.user_id AND goals.currency_id=NEW.id AND deleted_at IS NULL)
+       OR EXISTS(SELECT 1 FROM public.presets WHERE user_id=NEW.user_id AND default_currency_id=NEW.id AND deleted_at IS NULL) THEN
+      RAISE EXCEPTION USING ERRCODE='23514',MESSAGE='Currency is still in use';
+    END IF;
+  END IF;
+  IF r->>'deleted_at' IS NOT NULL THEN RETURN NULL; END IF;
+  v_currency_id := coalesce(r->>'currency_id',r->>'default_currency_id')::uuid;
+  v_account_id := coalesce(r->>'account_id',r->>'default_account_id')::uuid;
+  v_category_id := coalesce(r->>'category_id',r->>'default_category_id')::uuid;
+  IF v_account_id IS NOT NULL AND v_currency_id IS NOT NULL THEN
+    SELECT a.currency_id INTO actual_currency FROM public.accounts a WHERE a.user_id=NEW.user_id AND a.id=v_account_id;
+    IF actual_currency IS DISTINCT FROM v_currency_id THEN RAISE EXCEPTION USING ERRCODE='23514',MESSAGE='Account currency does not match'; END IF;
+  END IF;
+  IF v_category_id IS NOT NULL AND t IN ('transactions','presets') THEN
+    SELECT c.type::text INTO category_type FROM public.categories c WHERE c.user_id=NEW.user_id AND c.id=v_category_id;
+    IF category_type IS DISTINCT FROM (CASE WHEN r->>'type'='goal' THEN 'expense' ELSE r->>'type' END) THEN
+      RAISE EXCEPTION USING ERRCODE='23514',MESSAGE='Category type does not match';
+    END IF;
+  END IF;
+  IF t='accounts' AND EXISTS(SELECT 1 FROM public.transactions x WHERE x.user_id=NEW.user_id AND x.deleted_at IS NULL
+      AND (x.account_id=NEW.id OR x.destination_account_id=NEW.id) AND x.currency_id<>v_currency_id) THEN
+    RAISE EXCEPTION USING ERRCODE='23514',MESSAGE='An account with transactions cannot change currency';
+  END IF;
+  IF t='transactions' AND (r->>'amount')::bigint<=0 THEN RAISE EXCEPTION USING ERRCODE='23514',MESSAGE='Amount must be positive'; END IF;
+  IF t='transactions' AND r->>'recurrence_occurrence_id' IS NOT NULL AND NOT EXISTS(
+    SELECT 1 FROM public.recurring_occurrences o WHERE o.user_id=NEW.user_id AND o.id=(r->>'recurrence_occurrence_id')::uuid
+      AND o.transaction_id=NEW.id AND o.generation=(r->>'recurrence_generation')::integer
+      AND o.state IN ('posted','verified') AND o.deleted_at IS NULL
+  ) THEN RAISE EXCEPTION USING ERRCODE='23514',MESSAGE='Recurring transaction lineage does not match'; END IF;
+  RETURN NULL;
+END;
+$function$;
+REVOKE ALL ON FUNCTION public.validate_finance_links() FROM PUBLIC,anon,authenticated;
+DO $body$
+DECLARE t text;
+BEGIN
+  FOREACH t IN ARRAY ARRAY['currencies','accounts','presets','goals','transactions'] LOOP
+    EXECUTE format('CREATE CONSTRAINT TRIGGER finance_links_valid AFTER INSERT OR UPDATE ON public.%I DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION public.validate_finance_links()',t);
+  END LOOP;
+END;
+$body$;

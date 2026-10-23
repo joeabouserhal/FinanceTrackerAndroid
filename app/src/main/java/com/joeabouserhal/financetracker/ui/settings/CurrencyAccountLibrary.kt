@@ -110,7 +110,7 @@ internal fun CurrencyAccountLibrary(
                 Icon(painterResource(R.drawable.ic_more), "Manage ${currency.code}", Modifier.size(22.dp), tint = spec.muted)
               }
             }
-            Text(compactCurrencyText(group.sumOf { balances[it.id] ?: 0L }, currency.symbol),
+            com.joeabouserhal.financetracker.ui.components.PrivateAmount(compactCurrencyText(group.sumOf { balances[it.id] ?: 0L }, currency.symbol),
               style = MaterialTheme.typography.headlineSmall, color = spec.ink)
           }
         }
@@ -205,10 +205,10 @@ private fun CurrencyAccountRow(
           if (archivedCurrency != null) Text("$archivedCurrency · Archived",
             style = MaterialTheme.typography.labelSmall, color = spec.muted)
           else if (account.isDefault) Text("DEFAULT", style = MaterialTheme.typography.labelSmall, color = spec.accent)
-          if (largeText) Text(compactCurrencyText(balance, symbol), style = MaterialTheme.typography.labelLarge,
+          if (largeText) com.joeabouserhal.financetracker.ui.components.PrivateAmount(compactCurrencyText(balance, symbol), style = MaterialTheme.typography.labelLarge,
             color = if (balance < 0) spec.expense else spec.ink)
         }
-        if (!largeText) Text(compactCurrencyText(balance, symbol), style = MaterialTheme.typography.labelLarge,
+        if (!largeText) com.joeabouserhal.financetracker.ui.components.PrivateAmount(compactCurrencyText(balance, symbol), style = MaterialTheme.typography.labelLarge,
           color = if (balance < 0) spec.expense else spec.ink)
       }
       IconButton(onClick = onManage, modifier = Modifier.size(48.dp)) {

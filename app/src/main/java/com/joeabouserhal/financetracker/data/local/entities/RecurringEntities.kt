@@ -57,4 +57,5 @@ data class RecurringOccurrenceEntity(
   @ColumnInfo(name = "updated_at") val updatedAt: String,
   @ColumnInfo(name = "sync_version") val syncVersion: String = updatedAt,
   @ColumnInfo(name = "deleted_at") val deletedAt: String? = null,
+  @ColumnInfo(defaultValue = "0") val generation: Int = 0,
 )

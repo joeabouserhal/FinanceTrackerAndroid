@@ -1,6 +1,7 @@
 package com.joeabouserhal.financetracker.data.repositories
 
-import androidx.room.withTransaction
+import com.joeabouserhal.financetracker.data.local.withMutation
+import com.joeabouserhal.financetracker.data.local.validateReferences
 import com.joeabouserhal.financetracker.data.local.AppDatabase
 import com.joeabouserhal.financetracker.data.local.OutboxWriter
 import com.joeabouserhal.financetracker.data.local.dao.PresetDao
@@ -45,7 +46,9 @@ class PresetRepository(
         createdAt = now,
         updatedAt = now,
       )
-    db.withTransaction {
+    db.withMutation {
+      require(type in listOf(TransactionType.INCOME, TransactionType.EXPENSE)) { "Choose income or expense" }
+      db.validateReferences(ownerId, defaultCurrencyId, defaultAccountId, defaultCategoryId, type)
       dao.upsert(entity)
       OutboxWriter.enqueue(db, ownerId, "presets", OutboxAction.INSERT, OutboxWriter.preset(ownerId, entity))
     }
@@ -63,7 +66,10 @@ class PresetRepository(
   ) {
     require(name.trim().isNotBlank()) { "Preset name is required" }
     require(defaultAmount == null || defaultAmount > 0) { "Amount must be positive" }
-    db.withTransaction {
+    db.withMutation {
+      val current = dao.getById(ownerId, id)
+      require(current != null && current.deletedAt == null) { "This preset no longer exists" }
+      db.validateReferences(ownerId, defaultCurrencyId, defaultAccountId, defaultCategoryId, current.type, current.defaultAccountId == defaultAccountId)
       dao.update(ownerId, id, name.trim(), defaultAmount, defaultCurrencyId, defaultCategoryId, defaultAccountId, java.time.Instant.now().toString())
       dao.getById(ownerId, id)?.let { full ->
         OutboxWriter.enqueue(db, ownerId, "presets", OutboxAction.UPDATE, OutboxWriter.preset(ownerId, full))
@@ -72,7 +78,8 @@ class PresetRepository(
   }
 
   suspend fun archive(ownerId: String, id: String) {
-    db.withTransaction {
+    db.withMutation {
+      pauseSchedule(ownerId, id)
       dao.archive(ownerId, id, java.time.Instant.now().toString())
       dao.getById(ownerId, id)?.let { full ->
         OutboxWriter.enqueue(db, ownerId, "presets", OutboxAction.UPDATE, OutboxWriter.preset(ownerId, full))
@@ -81,11 +88,22 @@ class PresetRepository(
   }
 
   suspend fun delete(ownerId: String, id: String) {
-    db.withTransaction {
+    db.withMutation {
+      pauseSchedule(ownerId, id)
       val deletedAt = java.time.Instant.now().toString()
       if (ownerId == com.joeabouserhal.financetracker.data.local.GUEST_OWNER_ID) dao.delete(ownerId, id)
       else dao.delete(ownerId, id, deletedAt, com.joeabouserhal.financetracker.data.sync.SyncVersion.next())
       OutboxWriter.enqueue(db, ownerId, "presets", OutboxAction.DELETE, OutboxWriter.deletePayload(id))
+    }
+  }
+
+  private suspend fun pauseSchedule(ownerId: String, presetId: String) {
+    db.recurringScheduleDao().getForPreset(ownerId, presetId)?.let { schedule ->
+      if (!schedule.paused) {
+        val paused = schedule.copy(paused = true, updatedAt = java.time.Instant.now().toString())
+        db.recurringScheduleDao().upsert(paused)
+        OutboxWriter.enqueue(db, ownerId, "recurring_schedules", OutboxAction.UPDATE, OutboxWriter.recurringSchedule(ownerId, paused))
+      }
     }
   }
 }

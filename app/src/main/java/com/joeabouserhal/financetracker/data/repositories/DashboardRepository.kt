@@ -11,6 +11,13 @@ import com.joeabouserhal.financetracker.data.local.entities.TransactionEntity
 import com.joeabouserhal.financetracker.data.local.entities.TransactionType
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.Dispatchers
+
+private data class DashboardLedger(
+  val nets: List<com.joeabouserhal.financetracker.data.local.dao.AccountNetRow>,
+  val usedCurrencies: List<String>, val recent: List<TransactionEntity>, val month: List<TransactionEntity>,
+)
 
 data class AccountBalance(
   val account: AccountEntity,
@@ -54,31 +61,29 @@ class DashboardRepository(
       currencyDao.observeAll(ownerId),
       accountDao.observeActive(ownerId),
       categoryDao.observeAll(ownerId),
-      transactionDao.observeAll(ownerId),
-      transactionDao.observeBetween(ownerId, monthFrom, monthTo),
-    ) { currencies, accounts, categories, allTransactions, monthTransactions ->
-      buildDashboard(currencies, accounts, categories, allTransactions, monthTransactions, recentLimit)
-    }
+      combine(transactionDao.observeAccountNets(ownerId), transactionDao.observeUsedCurrencies(ownerId),
+        transactionDao.observeRecent(ownerId, recentLimit), transactionDao.observeBetween(ownerId, monthFrom, monthTo), ::DashboardLedger),
+    ) { currencies, accounts, categories, ledger ->
+      buildDashboard(currencies, accounts, categories, ledger)
+    }.flowOn(Dispatchers.Default)
 
   private fun buildDashboard(
     currencies: List<CurrencyEntity>,
     accounts: List<AccountEntity>,
     categories: List<CategoryEntity>,
-    allTransactions: List<TransactionEntity>,
-    monthTransactions: List<TransactionEntity>,
-    recentLimit: Int,
+    ledger: DashboardLedger,
   ): DashboardData {
     val currencyById = currencies.associateBy { it.id }
 
     // Single-pass per-account all-time nets (was O(accounts × transactions)
     // of full-list filters before this phase).
-    val netByAccount = accountBalanceMap(allTransactions)
+    val netByAccount = ledger.nets.associate { it.accountId to it.balanceMinor }
     val accountBalances =
       accounts.mapNotNull { account ->
         val currency = currencyById[account.currencyId] ?: return@mapNotNull null
         AccountBalance(account, currency, netByAccount[account.id] ?: 0L)
       }
-    val currenciesWithActivity = allTransactions.asSequence().map { it.currencyId }.toSet()
+    val currenciesWithActivity = ledger.usedCurrencies.toSet()
 
     val balances =
       currencies.map { currency ->
@@ -87,7 +92,7 @@ class DashboardRepository(
           currency = currency,
           totalMinor = perAccount.sumOf { it.balanceMinor },
           accounts = perAccount,
-          hasActivity = currency.id in currenciesWithActivity,
+          hasActivity = currency.id in currenciesWithActivity || perAccount.any { it.account.openingBalanceMinor != 0L },
         )
       }
         .sortedBy { if (it.currency.isDefault) 0 else 1 }
@@ -95,7 +100,7 @@ class DashboardRepository(
     // Single-pass per-currency monthly activity.
     val incomeByCurrency = HashMap<String, Long>()
     val expenseByCurrency = HashMap<String, Long>()
-    for (t in monthTransactions) {
+    for (t in ledger.month) {
       if (t.type == TransactionType.TRANSFER) continue
       val map = if (t.type == TransactionType.INCOME) incomeByCurrency else expenseByCurrency
       map[t.currencyId] = (map[t.currencyId] ?: 0L) + t.amount
@@ -108,7 +113,7 @@ class DashboardRepository(
       }
         .sortedBy { if (it.currency.isDefault) 0 else 1 }
 
-    val recent = enrichTransactions(allTransactions.take(recentLimit), categories, accounts, currencies)
+    val recent = enrichTransactions(ledger.recent, categories, accounts, currencies)
 
     return DashboardData(balances, monthly, recent)
   }

@@ -28,7 +28,7 @@ class SyncWorker(appContext: Context, params: WorkerParameters) : CoroutineWorke
     val app = applicationContext as? FinanceTrackerApplication ?: return Result.success()
     return when (val outcome = app.container.syncEngine.sync()) {
       is SyncOutcome.Skipped -> if (outcome.reason == SyncOutcome.SkipReason.NO_SESSION) Result.retry() else Result.success()
-      // Validation failures remain visible and are retried on manual/periodic runs.
+      // Quarantined validation failures remain visible without automatic retries.
       is SyncOutcome.Completed -> if (outcome.failedOps == 0 && !outcome.pullFailed) Result.success() else Result.retry()
     }
   }

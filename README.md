@@ -23,6 +23,24 @@ Themes apply immediately and are saved locally across restarts. They work offlin
 
 MIT notices are bundled in the APK and available under **Themes > Theme credits & licenses**. The same notices and source links are in [theme_licenses.txt](app/src/main/res/raw/theme_licenses.txt).
 
+## App Lock
+
+Open **Options > App Lock** to require the phone's biometrics or screen-lock
+credential before opening the ledger. Authentication is required to enable or disable
+the setting. Choose **App restarts**, **I leave the app**, or **After time away**
+(1–1440 minutes in the background). A killed process always requires unlocking;
+rotation does not. The setting is local to the device and covers guest and signed-in
+profiles, launcher shortcuts, and the recurring-notification snooze screen.
+
+App Lock blocks the interface; it does not encrypt the Room database or stop background
+sync/recurring entries. Recent-app previews are hidden on Android 13 and newer while
+enabled. **Block screenshots & screen mirroring** is a separate, default-off option
+on the App Lock page, available even with App Lock switched off. Turning it on applies
+Android's secure flag and also blocks scrcpy. With it off, unlocked financial data
+can appear in recordings and screenshots. Disabling App Lock does not change this option.
+The phone's PIN/pattern/password is the recovery option if biometrics are unavailable.
+No biometric data is stored by the app. Android backup remains disabled.
+
 ## Technology
 
 - Kotlin
@@ -35,7 +53,7 @@ MIT notices are bundled in the APK and available under **Themes > Theme credits 
 
 ## Requirements
 
-- Android Studio with support for Android Gradle Plugin 9.0.1
+- Android Studio with support for Android Gradle Plugin 9.1.1
 - JDK 17
 - Android SDK 36
 - An Android device or emulator running Android 7.0 (API 24) or newer
@@ -43,7 +61,7 @@ MIT notices are bundled in the APK and available under **Themes > Theme credits 
 - Optional: a Supabase project for authentication and cloud synchronization
 - Optional: ADB for command-line installation and device testing
 
-The repository includes the Gradle wrapper, so a separate Gradle installation is not required. The current wrapper uses Gradle 9.1.0.
+The repository includes the Gradle wrapper, so a separate Gradle installation is not required. The current wrapper uses Gradle 9.3.1.
 
 ## Getting started
 
@@ -197,6 +215,22 @@ Room is the app's immediate source of truth. User CRUD actions commit locally an
 Background synchronization is network-constrained and scheduled periodically, with additional requests after events such as sign-in or reconnection. Transient failures use backoff and retry. Authentication or validation problems can require user action.
 
 Guest records remain in a separate local partition and are not automatically migrated or uploaded after sign-in.
+
+Android cloud backup and device-to-device transfer are disabled for app data. Guest data is device-only: uninstalling the app or losing the phone removes it. Signed-in data can be restored by signing in and pulling from Supabase; pending changes must finish syncing before uninstalling.
+
+Compound changes are pushed as atomic batches. Permanent failures are quarantined; Options → Sync → Review pending changes identifies the affected records and allows retry or explicit discard. Discard stops uploading the selected action but keeps local records, which can then differ from other devices.
+
+## Everyday shortcuts and exports
+
+- New currencies and accounts offer an optional opening balance (blank means zero). A currency's starting funds go into its default Cash account. Opening balances affect account totals, transfer previews and goal funding, but never count as income/expense or create transaction-history entries. They sync as part of the account; existing accounts retain a zero opening balance. Transaction-only CSV exports do not include account opening balances.
+
+- In Transactions, swipe right to reveal Copy, then tap it to open an unsaved copy dated today; swipe left reveals Delete. Swiping alone never copies or deletes. Goal withdrawals copy as ordinary expenses, without goal/recurring links.
+- New-entry forms offer Save & add another. Amount, title and notes clear after a successful save; currency, accounts, category and date stay selected.
+- Transfers preview both account balances before and after the move. No currency conversion is performed.
+- Search matches titles, notes, amounts (including grouped/decimal formats), categories, either transfer account, currencies, transaction types and ISO dates. Multiple words can match different fields.
+- Use the eye beside Dashboard → Balance (or Options → Hide amounts) to blur display amounts. This is a presentation/privacy aid, not an app lock; editable forms remain readable.
+- Export CSV from Options for the current profile, or the export icon in Transactions for the full matching search/filter result, not just loaded rows. The system file picker chooses the destination; no broad storage permission is needed. CSV contains unencrypted financial data. Expense/goal amounts are negative; transfers appear once with both accounts, rather than being counted as income or expense.
+- Forgot password on Sign in sends a recovery email. Open the link on the same phone, choose a new password, then sign in. Recovery uses an isolated, temporary session and never changes the active local profile.
 
 ## Project structure
 

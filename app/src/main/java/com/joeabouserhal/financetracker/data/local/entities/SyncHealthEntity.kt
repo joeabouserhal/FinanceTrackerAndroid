@@ -10,4 +10,7 @@ data class SyncHealthEntity(
   @ColumnInfo(name = "last_success_at") val lastSuccessAt: String? = null,
   @ColumnInfo(name = "last_error") val lastError: String? = null,
   @ColumnInfo(name = "error_kind") val errorKind: String? = null,
+  @ColumnInfo(name = "last_push_at") val lastPushAt: String? = null,
+  @ColumnInfo(name = "last_pull_at") val lastPullAt: String? = null,
+  @ColumnInfo(name = "conflicts_resolved", defaultValue = "0") val conflictsResolved: Int = 0,
 )

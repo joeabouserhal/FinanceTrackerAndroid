@@ -5,6 +5,13 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class GoalModelTest {
+  @Test fun openingBalancesFundAccountAndWholeCurrencyGoalsWithoutTransactions() {
+    val funded = accounts.map { it.copy(openingBalanceMinor = if (it.id == "bank") 12000 else if (it.id == "cash") 3000 else 0) }
+    val progress = buildProgress(listOf(goal(), goal("bank"), goal("cash")), emptyList(), listOf(currency), funded)
+    assertEquals(listOf(15000L, 12000L, 3000L), progress.map { it.progressMinor })
+    assertTrue(progress.first().ready)
+    assertTrue(progress[1].ready)
+  }
   private val currency = CurrencyEntity("usd", "owner", "USD", "$", "Dollar", true, "", "")
   private val accounts = listOf(
     AccountEntity("cash", "owner", "usd", "Cash", createdAt = "", updatedAt = ""),

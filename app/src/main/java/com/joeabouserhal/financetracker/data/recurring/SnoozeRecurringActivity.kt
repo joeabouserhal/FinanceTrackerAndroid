@@ -1,7 +1,6 @@
 package com.joeabouserhal.financetracker.data.recurring
 
 import android.os.Bundle
-import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Arrangement
@@ -26,7 +25,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
 /** Small focused activity launched from a notification; it never exposes another owner's occurrence. */
-class SnoozeRecurringActivity : ComponentActivity() {
+class SnoozeRecurringActivity : com.joeabouserhal.financetracker.data.security.AppLockActivity() {
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
     val occurrenceId = intent.getStringExtra(RecurringNotifications.EXTRA_OCCURRENCE_ID) ?: run { finish(); return }
@@ -44,6 +43,7 @@ class SnoozeRecurringActivity : ComponentActivity() {
       }
       FinanceTrackerTheme {
         Surface(color = MaterialTheme.colorScheme.background) {
+          com.joeabouserhal.financetracker.ui.security.AppLockGate(this@SnoozeRecurringActivity) {
           BrDialog(title = "SNOOZE TRANSACTION", onDismiss = ::finish, dismissText = null) {
             Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
               BrButton("1 HOUR", { snooze(Instant.now().plusSeconds(3600)) }, style = BrButtonStyle.SOLID)
@@ -72,6 +72,7 @@ class SnoozeRecurringActivity : ComponentActivity() {
               snooze(date.atTime(minutes / 60, minutes % 60).atZone(ZoneId.systemDefault()).toInstant())
               chosenDate = null
             })
+          }
           }
         }
       }

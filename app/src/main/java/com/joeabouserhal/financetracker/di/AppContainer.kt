@@ -49,6 +49,7 @@ class AppContainer(context: Context) {
   val settingsDataStore: DataStore<Preferences> = appContext.settingsDataStore
 
   val settingsRepository: SettingsRepository = SettingsRepository(settingsDataStore)
+  val appLockManager = com.joeabouserhal.financetracker.data.security.AppLockManager(appContext as android.app.Application)
 
   val appDatabase: AppDatabase =
     Room.databaseBuilder(appContext, AppDatabase::class.java, "finance_tracker.db")
@@ -84,7 +85,7 @@ class AppContainer(context: Context) {
   // Auth (null when Supabase is not configured → guest-only mode)
   val supabaseClientProvider: SupabaseClientProvider = SupabaseClientProvider(appContext)
   val authRepository: AuthRepository =
-    AuthRepository(supabaseClientProvider.client?.let { SupabaseAuthApi(it) })
+    AuthRepository(supabaseClientProvider.client?.let { SupabaseAuthApi(it, requireNotNull(supabaseClientProvider.recoveryClient)) })
   val googleSignIn: GoogleSignIn = GoogleSignIn(appContext)
 
   // Offline-first sync engine

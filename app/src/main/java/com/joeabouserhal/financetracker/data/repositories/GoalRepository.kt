@@ -1,6 +1,7 @@
 package com.joeabouserhal.financetracker.data.repositories
 
-import androidx.room.withTransaction
+import com.joeabouserhal.financetracker.data.local.withMutation
+import com.joeabouserhal.financetracker.data.local.validateReferences
 import com.joeabouserhal.financetracker.data.local.AppDatabase
 import com.joeabouserhal.financetracker.data.local.OutboxWriter
 import com.joeabouserhal.financetracker.data.local.dao.GoalDao
@@ -52,7 +53,8 @@ class GoalRepository(
         createdAt = now,
         updatedAt = now,
       )
-    db.withTransaction {
+    db.withMutation {
+      db.validateReferences(ownerId, currencyId, accountId)
       dao.upsert(entity)
       OutboxWriter.enqueue(db, ownerId, "goals", OutboxAction.INSERT, OutboxWriter.goal(ownerId, entity))
     }
@@ -70,7 +72,11 @@ class GoalRepository(
     require(name.trim().isNotBlank()) { "Goal name is required" }
     require(targetMinor > 0) { "Goal target must be positive" }
     require(currencyId.isNotBlank()) { "Currency is required" }
-    db.withTransaction {
+    db.withMutation {
+      val existing = dao.getById(ownerId, id)
+      require(existing != null && existing.deletedAt == null) { "This goal no longer exists" }
+      require(!existing.completed || (existing.currencyId == currencyId && existing.accountId == accountId)) { "Undo completion before changing the goal's accounts or currency" }
+      db.validateReferences(ownerId, currencyId, accountId, allowArchivedAccount = existing.accountId == accountId)
       dao.update(
         ownerId,
         id,
@@ -78,7 +84,7 @@ class GoalRepository(
         targetMinor,
         currencyId,
         accountId?.takeIf { it.isNotBlank() },
-        completed = false,
+        completed = existing.completed,
         updatedAt = java.time.Instant.now().toString(),
       )
       dao.getById(ownerId, id)?.let { full ->
@@ -104,13 +110,14 @@ class GoalRepository(
         .sortedBy { it.first }
     require(deductions.isNotEmpty()) { "At least one account must be debited" }
 
-    return db.withTransaction {
+    return db.withMutation {
       // Re-check inside the transaction: Room serializes write transactions,
       // so a double-tap or racing completion can't double-debit the goal.
-      val existing = dao.getById(ownerId, id) ?: return@withTransaction null
-      if (existing.completed) return@withTransaction null
+      val existing = dao.getById(ownerId, id) ?: return@withMutation null
+      if (existing.completed || existing.deletedAt != null) return@withMutation null
 
-      require(deductions.sumOf { it.second } == existing.targetMinor) {
+      val total = deductions.fold(java.math.BigInteger.ZERO) { sum, entry -> sum + java.math.BigInteger.valueOf(entry.second) }
+      require(total == java.math.BigInteger.valueOf(existing.targetMinor)) {
         "Account splits must add up to the goal amount"
       }
       // Every debited account must belong to the goal's currency — otherwise
@@ -162,9 +169,9 @@ class GoalRepository(
   /** Undo a completed goal — fully reverses it: removes its GOAL withdrawals
    * and moves it back to the active list. */
   suspend fun markActive(ownerId: String, id: String) {
-    db.withTransaction {
-      val existing = dao.getById(ownerId, id) ?: return@withTransaction
-      if (!existing.completed) return@withTransaction
+    db.withMutation {
+      val existing = dao.getById(ownerId, id) ?: return@withMutation
+      if (!existing.completed) return@withMutation
 
       // Remove every withdrawal this goal produced (multi-account goals
       // create several), then un-complete.
@@ -191,7 +198,7 @@ class GoalRepository(
   }
 
   suspend fun delete(ownerId: String, id: String) {
-    db.withTransaction {
+    db.withMutation {
       val deletedAt = java.time.Instant.now().toString()
       if (ownerId == com.joeabouserhal.financetracker.data.local.GUEST_OWNER_ID) dao.delete(ownerId, id)
       else dao.delete(ownerId, id, deletedAt, com.joeabouserhal.financetracker.data.sync.SyncVersion.next())

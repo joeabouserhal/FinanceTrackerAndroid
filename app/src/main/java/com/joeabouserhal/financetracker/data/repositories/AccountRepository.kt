@@ -1,6 +1,6 @@
 package com.joeabouserhal.financetracker.data.repositories
 
-import androidx.room.withTransaction
+import com.joeabouserhal.financetracker.data.local.withMutation
 import com.joeabouserhal.financetracker.data.local.AppDatabase
 import com.joeabouserhal.financetracker.data.local.OutboxWriter
 import com.joeabouserhal.financetracker.data.local.dao.AccountDao
@@ -25,8 +25,10 @@ class AccountRepository(
   fun observeByCurrency(ownerId: String, currencyId: String): Flow<List<AccountEntity>> =
     dao.observeByCurrency(ownerId, currencyId)
 
-  suspend fun add(ownerId: String, currencyId: String, name: String): AccountEntity {
+  suspend fun add(ownerId: String, currencyId: String, name: String, openingBalanceMinor: Long = 0): AccountEntity = db.withMutation {
     require(name.trim().isNotBlank()) { "Account name is required" }
+    val currency = db.currencyDao().getById(ownerId, currencyId)
+    require(currency != null && currency.deletedAt == null) { "Currency is unavailable" }
     val now = java.time.Instant.now().toString()
     // The first active account of a currency becomes its default.
     val hasActive = dao.getAll(ownerId).any { it.currencyId == currencyId && !it.archived }
@@ -40,20 +42,24 @@ class AccountRepository(
         isDefault = !hasActive,
         createdAt = now,
         updatedAt = now,
+        openingBalanceMinor = openingBalanceMinor,
       )
-    db.withTransaction {
+    db.withMutation {
       dao.upsert(entity)
       OutboxWriter.enqueue(db, ownerId, "accounts", OutboxAction.INSERT, OutboxWriter.account(ownerId, entity))
     }
-    return entity
+    entity
   }
 
   suspend fun update(ownerId: String, id: String, name: String, currencyId: String) {
     require(name.trim().isNotBlank()) { "Account name is required" }
-    db.withTransaction {
+    db.withMutation {
       val target = dao.getById(ownerId, id)
-      require(target == null || target.currencyId == currencyId || transactionDao.countByAccount(ownerId, id) == 0) {
-        "An account with transactions cannot change currency"
+      require(target != null && target.deletedAt == null) { "This account no longer exists" }
+      val currency = db.currencyDao().getById(ownerId, currencyId)
+      require(currency != null && currency.deletedAt == null) { "Currency is unavailable" }
+      require(target.currencyId == currencyId || target.openingBalanceMinor == 0L && transactionDao.countByAccount(ownerId, id) == 0) {
+        "An account with transactions or an opening balance cannot change currency"
       }
       val now = java.time.Instant.now().toString()
       dao.update(ownerId, id, name.trim(), currencyId, now)
@@ -77,7 +83,7 @@ class AccountRepository(
   suspend fun setDefault(ownerId: String, id: String) {
     val target = dao.getById(ownerId, id) ?: return
     require(!target.archived) { "Can't set an archived account as default" }
-    db.withTransaction {
+    db.withMutation {
       val now = java.time.Instant.now().toString()
       dao.clearDefaultForCurrency(ownerId, target.currencyId, now)
       dao.setDefault(ownerId, id, now)
@@ -92,15 +98,17 @@ class AccountRepository(
     require(hasAnotherActiveAccount(ownerId, target)) {
       "Each currency needs at least one account — add another account before hiding this one"
     }
-    db.withTransaction {
+    db.withMutation {
       dao.archive(ownerId, id, java.time.Instant.now().toString())
-      if (target.isDefault) promoteFirstActive(ownerId, target.currencyId, exceptId = target.id)
+      if (target.isDefault) promoteFirstActive(ownerId, target.currencyId, exceptId = target.id)?.let { promoted ->
+        enqueueChanged(ownerId, dao.getAll(ownerId).filter { it.id == promoted })
+      }
       enqueueChanged(ownerId, dao.getAll(ownerId).filter { it.currencyId == target.currencyId })
     }
   }
 
   suspend fun restore(ownerId: String, id: String) {
-    db.withTransaction {
+    db.withMutation {
       dao.restore(ownerId, id, java.time.Instant.now().toString())
       val restored = dao.getById(ownerId, id)
       // If its currency lost its default while this was archived, retake it.
@@ -121,11 +129,13 @@ class AccountRepository(
     require(hasAnotherActiveAccount(ownerId, target)) {
       "Each currency needs at least one account — add another account before deleting this one"
     }
-    db.withTransaction {
+    db.withMutation {
       val deletedAt = java.time.Instant.now().toString()
       if (ownerId == com.joeabouserhal.financetracker.data.local.GUEST_OWNER_ID) dao.delete(ownerId, id)
       else dao.delete(ownerId, id, deletedAt, com.joeabouserhal.financetracker.data.sync.SyncVersion.next())
-      if (target.isDefault) promoteFirstActive(ownerId, target.currencyId, exceptId = target.id)
+      if (target.isDefault) promoteFirstActive(ownerId, target.currencyId, exceptId = target.id)?.let { promoted ->
+        enqueueChanged(ownerId, dao.getAll(ownerId).filter { it.id == promoted })
+      }
       OutboxWriter.enqueue(db, ownerId, "accounts", OutboxAction.DELETE, OutboxWriter.deletePayload(id))
     }
   }

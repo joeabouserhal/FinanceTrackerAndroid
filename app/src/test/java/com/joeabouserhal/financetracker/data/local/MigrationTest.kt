@@ -33,6 +33,46 @@ import org.robolectric.annotation.Config
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35], application = android.app.Application::class)
 class MigrationTest {
+  @Test fun migrate16To17PreservesAccountsAndQueue() {
+    val name = "opening-${java.util.UUID.randomUUID()}.db"
+    try {
+      openVersion(16, name).use { old ->
+        old.execSQL("INSERT INTO currencies(id,owner_id,code,symbol,name,is_default,created_at,updated_at) VALUES('usd','owner','USD','$','Dollar',1,'created','updated')")
+        old.execSQL("INSERT INTO accounts(id,owner_id,currency_id,name,archived,is_default,created_at,updated_at) VALUES('cash','owner','usd','Cash',0,1,'created','updated')")
+        old.execSQL("INSERT INTO outbox(op_id,owner_id,table_name,action,payload_json,created_at,attempts,batch_id,batch_index) VALUES('op','owner','accounts','INSERT','{\"id\":\"cash\"}','created',0,'batch',0)")
+      }
+      val room = Room.databaseBuilder(context, AppDatabase::class.java, name).addMigrations(Migrations.MIGRATION_16_17).allowMainThreadQueries().build()
+      try {
+        val db = room.openHelper.writableDatabase
+        assertMatchesExportedSchema(db, 17)
+        db.query("SELECT name,opening_balance,created_at,updated_at FROM accounts WHERE id='cash'").use {
+          assertTrue(it.moveToFirst()); assertEquals("Cash", it.getString(0)); assertEquals(0L, it.getLong(1))
+          assertEquals("created", it.getString(2)); assertEquals("updated", it.getString(3))
+        }
+        db.query("SELECT payload_json,batch_id FROM outbox WHERE op_id='op'").use {
+          assertTrue(it.moveToFirst()); assertEquals("{\"id\":\"cash\"}", it.getString(0)); assertEquals("batch", it.getString(1))
+        }
+      } finally { room.close() }
+    } finally { context.deleteDatabase(name) }
+  }
+  @Test fun `version 16 preserves queued operations and initializes durable batch state`() {
+    val name = "audit-${java.util.UUID.randomUUID()}.db"
+    try {
+      openVersion(15, name).use { old ->
+        old.execSQL("INSERT INTO outbox(op_id,owner_id,table_name,action,payload_json,created_at,attempts,error_kind) VALUES('stable-op','user','currencies','UPDATE','{}','2026-01-01',3,'ACTION_REQUIRED')")
+      }
+      val room = Room.databaseBuilder(context, AppDatabase::class.java, name).addMigrations(Migrations.MIGRATION_15_16, Migrations.MIGRATION_16_17).allowMainThreadQueries().build()
+      try {
+        val database = room.openHelper.writableDatabase
+        assertMatchesExportedSchema(database, 17)
+        database.query("SELECT op_id,batch_id,batch_index,state,attempts,error_code,next_attempt_at FROM outbox").use {
+          assertTrue(it.moveToFirst()); assertEquals("stable-op", it.getString(0)); assertEquals("stable-op", it.getString(1))
+          assertEquals(0, it.getInt(2)); assertEquals("ACTION_REQUIRED", it.getString(3)); assertEquals(3, it.getInt(4))
+          assertTrue(it.isNull(5)); assertTrue(it.isNull(6))
+        }
+      } finally { room.close() }
+    } finally { context.deleteDatabase(name) }
+  }
 
   private val context: Context = ApplicationProvider.getApplicationContext()
   private val json = Json { ignoreUnknownKeys = true }
@@ -278,6 +318,8 @@ class MigrationTest {
         .addMigrations(Migrations.MIGRATION_12_13)
         .addMigrations(Migrations.MIGRATION_13_14)
         .addMigrations(Migrations.MIGRATION_14_15)
+        .addMigrations(Migrations.MIGRATION_15_16)
+        .addMigrations(Migrations.MIGRATION_16_17)
         .allowMainThreadQueries()
         .build()
       try {
@@ -285,7 +327,7 @@ class MigrationTest {
           assertTrue(it.moveToFirst())
           assertEquals("Guest", it.getString(0))
         }
-        assertEquals(15, room.openHelper.writableDatabase.version)
+        assertEquals(17, room.openHelper.writableDatabase.version)
         room.openHelper.writableDatabase.query("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='assistant_commands'").use {
           assertTrue(it.moveToFirst())
           assertEquals(0, it.getInt(0))
@@ -331,6 +373,8 @@ class MigrationTest {
       }
       val room = Room.databaseBuilder(context, AppDatabase::class.java, name)
         .addMigrations(Migrations.MIGRATION_14_15)
+        .addMigrations(Migrations.MIGRATION_15_16)
+        .addMigrations(Migrations.MIGRATION_16_17)
         .setJournalMode(androidx.room.RoomDatabase.JournalMode.TRUNCATE)
         .allowMainThreadQueries().build()
       try {
@@ -339,7 +383,7 @@ class MigrationTest {
           assertTrue(it.moveToFirst()); assertEquals(100L, it.getLong(0)); assertEquals("other", it.getString(1))
           assertEquals("2026-01-01", it.getString(2)); assertEquals("occurrence", it.getString(3)); assertNull(it.getString(4))
         }
-        assertMatchesExportedSchema(db, 15)
+        assertMatchesExportedSchema(db, 17)
         db.query("PRAGMA foreign_key_check").use { assertTrue(!it.moveToFirst()) }
       } finally { room.close() }
     } finally { context.deleteDatabase(name) }

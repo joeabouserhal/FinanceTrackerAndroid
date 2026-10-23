@@ -17,8 +17,8 @@ fun TransactionEntity.amountForAccount(id: String): Long = when {
   else -> 0L
 }
 
-fun accountBalanceMap(transactions: List<TransactionEntity>): Map<String, Long> {
-  val balances = mutableMapOf<String, Long>()
+fun accountBalanceMap(transactions: List<TransactionEntity>, accounts: List<com.joeabouserhal.financetracker.data.local.entities.AccountEntity> = emptyList()): Map<String, Long> {
+  val balances = accounts.filter { it.deletedAt == null }.associate { it.id to it.openingBalanceMinor }.toMutableMap()
   transactions.filter { it.deletedAt == null }.forEach { tx ->
     tx.accountId?.let { balances[it] = (balances[it] ?: 0L) + tx.amountForAccount(it) }
     tx.destinationAccountId?.takeIf { tx.type == TransactionType.TRANSFER }?.let {

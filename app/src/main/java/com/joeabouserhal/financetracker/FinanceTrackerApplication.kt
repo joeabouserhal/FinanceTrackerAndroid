@@ -37,7 +37,11 @@ class FinanceTrackerApplication : Application() {
     }
 
     // Background sync: periodic, network-constrained. Sign-out cancels it.
-    container.syncScheduler.startPeriodic()
+    container.applicationScope.launch {
+      container.sessionManager.session.collectLatest { active ->
+        if (active.isGuest) container.syncScheduler.cancelAll() else container.syncScheduler.startPeriodic()
+      }
+    }
 
     // Foreground trigger: whenever the device comes online and someone is
     // signed in, drain the outbox / pull right away. The worker itself

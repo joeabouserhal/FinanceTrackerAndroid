@@ -84,7 +84,9 @@ fun BrButton(
             else -> face
           },
         )
-        .then(if (modal) Modifier else Modifier.border(spec.borderWidth, if (enabled) borderColor else spec.muted))
+        .then(if (!modal || style == BrButtonStyle.OUTLINE)
+          Modifier.border(spec.borderWidth, if (enabled) borderColor else spec.muted)
+        else Modifier)
         .clickable(
           interactionSource = interactionSource,
           indication = null,

@@ -4,6 +4,8 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -16,11 +18,12 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.text.input.KeyboardType
+import com.joeabouserhal.financetracker.utils.OpeningBalance
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.joeabouserhal.financetracker.data.local.entities.AccountEntity
 import com.joeabouserhal.financetracker.data.local.entities.CurrencyEntity
 import com.joeabouserhal.financetracker.data.local.entities.TransactionType
-import com.joeabouserhal.financetracker.data.session.Session
 import com.joeabouserhal.financetracker.theme.LocalThemeSpec
 import com.joeabouserhal.financetracker.ui.components.BrButton
 import com.joeabouserhal.financetracker.ui.components.BrChip
@@ -36,6 +39,7 @@ import kotlinx.coroutines.launch
  */
 @Composable
 fun CurrenciesAccountsScreen(
+  ownerId: String,
   onBack: () -> Unit,
   onOpenAccount: (String) -> Unit,
   modifier: Modifier = Modifier,
@@ -43,8 +47,6 @@ fun CurrenciesAccountsScreen(
   val container = rememberAppContainer()
   val scope = rememberCoroutineScope()
   val spec = LocalThemeSpec.current
-  val session by container.sessionManager.session.collectAsStateWithLifecycle(initialValue = Session())
-  val ownerId = session.ownerId
 
   val currencies by remember(ownerId) { container.currencyRepository.observeAll(ownerId) }
     .collectAsStateWithLifecycle(initialValue = emptyList())
@@ -60,11 +62,14 @@ fun CurrenciesAccountsScreen(
   var editingAccount by remember { mutableStateOf<AccountEntity?>(null) }
   var error by remember { mutableStateOf<String?>(null) }
   var info by remember { mutableStateOf<String?>(null) }
+  var savingCurrency by remember(ownerId) { mutableStateOf(false) }
+  var savingAccount by remember(ownerId) { mutableStateOf(false) }
 
   val transactions by remember(ownerId) { container.transactionRepository.observeAll(ownerId) }
     .collectAsStateWithLifecycle(initialValue = emptyList())
-  val balances = remember(transactions, ownerId) {
-    com.joeabouserhal.financetracker.data.repositories.accountBalanceMap(transactions.filter { it.ownerId == ownerId })
+  val balances = remember(transactions, accounts, archivedAccounts, ownerId) {
+    com.joeabouserhal.financetracker.data.repositories.accountBalanceMap(transactions.filter { it.ownerId == ownerId },
+      (accounts + archivedAccounts).filter { it.ownerId == ownerId })
   }
   var archivingAccount by remember(ownerId) { mutableStateOf<AccountEntity?>(null) }
   var deletingAccount by remember(ownerId) { mutableStateOf<AccountEntity?>(null) }
@@ -143,15 +148,22 @@ fun CurrenciesAccountsScreen(
     CurrencyDialog(
       title = "ADD CURRENCY",
       initial = null,
+      busy = savingCurrency,
       saveError = error,
       onDismiss = { showAddCurrency = false },
-      onSave = { code, symbol, name, isDefault ->
-        scope.launch {
-          try {
-            container.currencyRepository.add(ownerId, code, symbol, name, isDefault)
-            showAddCurrency = false
-            error = null
-          } catch (e: Exception) { error = e.message }
+      onSave = { code, symbol, name, isDefault, openingBalance ->
+        if (!savingCurrency) {
+          savingCurrency = true
+          error = null
+          scope.launch {
+            try {
+              container.currencyRepository.add(ownerId, code, symbol, name, isDefault, openingBalance)
+              showAddCurrency = false
+              error = null
+            } catch (e: kotlinx.coroutines.CancellationException) { throw e }
+            catch (e: Exception) { error = e.message }
+            finally { savingCurrency = false }
+          }
         }
       },
     )
@@ -163,7 +175,7 @@ fun CurrenciesAccountsScreen(
       initial = currency,
       saveError = error,
       onDismiss = { editingCurrency = null },
-      onSave = { code, symbol, name, isDefault ->
+      onSave = { code, symbol, name, isDefault, _ ->
         scope.launch {
           try {
             container.currencyRepository.update(ownerId, currency.id, code, symbol, name, isDefault)
@@ -199,18 +211,26 @@ fun CurrenciesAccountsScreen(
   addingAccountFor?.let { currency ->
     AccountDialog(
       title = "ADD ACCOUNT",
+      busy = savingAccount,
       initialName = "",
       saveError = error,
       initialCurrencyId = currency.id,
       currencies = currencies,
       onDismiss = { addingAccountFor = null },
-      onSave = { name, currencyId ->
-        scope.launch {
-          try {
-            container.accountRepository.add(ownerId, currencyId, name)
-            addingAccountFor = null
-            error = null
-          } catch (e: Exception) { error = e.message }
+      allowOpeningBalance = true,
+      onSave = { name, currencyId, openingBalance ->
+        if (!savingAccount) {
+          savingAccount = true
+          error = null
+          scope.launch {
+            try {
+              container.accountRepository.add(ownerId, currencyId, name, openingBalance)
+              addingAccountFor = null
+              error = null
+            } catch (e: kotlinx.coroutines.CancellationException) { throw e }
+            catch (e: Exception) { error = e.message }
+            finally { savingAccount = false }
+          }
         }
       },
     )
@@ -224,7 +244,7 @@ fun CurrenciesAccountsScreen(
       initialCurrencyId = account.currencyId,
       currencies = currencies,
       onDismiss = { editingAccount = null },
-      onSave = { name, currencyId ->
+      onSave = { name, currencyId, _ ->
         scope.launch {
           try {
             container.accountRepository.update(ownerId, account.id, name, currencyId)
@@ -248,32 +268,42 @@ internal fun CurrencyDialog(
   title: String,
   initial: CurrencyEntity?,
   onDismiss: () -> Unit,
-  onSave: (code: String, symbol: String, name: String, isDefault: Boolean) -> Unit,
+  onSave: (code: String, symbol: String, name: String, isDefault: Boolean, openingBalanceMinor: Long) -> Unit,
   saveError: String? = null,
+  busy: Boolean = false,
 ) {
   var code by remember { mutableStateOf(initial?.code ?: "") }
   var symbol by remember { mutableStateOf(initial?.symbol ?: "") }
   var name by remember { mutableStateOf(initial?.name ?: "") }
   var isDefault by remember { mutableStateOf(initial?.isDefault ?: false) }
+  var openingBalance by remember { mutableStateOf("") }
   var validation by remember { mutableStateOf<String?>(null) }
 
   BrDialog(
     title = title,
     onDismiss = onDismiss,
     scrollContent = true,
+    confirmEnabled = !busy,
     onConfirm = {
       validation = when {
         code.isBlank() -> "Currency code is required"
         name.isBlank() -> "Currency name is required"
         else -> null
       }
-      if (validation == null) onSave(code, symbol, name, isDefault)
+      if (validation == null) {
+        val amount = try { if (initial == null) OpeningBalance.parse(openingBalance) else 0L }
+        catch (e: IllegalArgumentException) { validation = e.message; return@BrDialog }
+        onSave(code, symbol, name, isDefault, amount)
+      }
     },
   ) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-      BrTextField(code, { code = it; validation = null }, "CODE · e.g. USD")
-      BrTextField(symbol, { symbol = it }, "SYMBOL · e.g. $")
-      BrTextField(name, { name = it }, "NAME")
+      BrTextField(name, { name = it }, "NAME · United States Dollar", enabled = !busy)
+      Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        BrTextField(symbol, { symbol = it }, "SYMBOL · $", modifier = Modifier.weight(1f), enabled = !busy)
+        BrTextField(code, { code = it; validation = null }, "CODE · USD", modifier = Modifier.weight(1f), enabled = !busy)
+      }
+      if (initial == null) OpeningBalanceField(openingBalance, { openingBalance = it; validation = null }, "Starts in the default Cash account. Not counted as income.", enabled = !busy)
       (validation ?: saveError)?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
       Row(verticalAlignment = Alignment.CenterVertically) {
         BrChip("Default currency", selected = isDefault, onClick = { isDefault = !isDefault })
@@ -289,29 +319,37 @@ internal fun AccountDialog(
   initialCurrencyId: String,
   currencies: List<CurrencyEntity>,
   onDismiss: () -> Unit,
-  onSave: (name: String, currencyId: String) -> Unit,
+  onSave: (name: String, currencyId: String, openingBalanceMinor: Long) -> Unit,
   onDelete: (() -> Unit)? = null,
   saveError: String? = null,
+  allowOpeningBalance: Boolean = false,
+  busy: Boolean = false,
 ) {
   var name by remember { mutableStateOf(initialName) }
   var currencyId by remember { mutableStateOf(initialCurrencyId) }
+  var openingBalance by remember { mutableStateOf("") }
   var validation by remember { mutableStateOf<String?>(null) }
 
   BrDialog(
     title = title,
     onDismiss = onDismiss,
     scrollContent = true,
+    confirmEnabled = !busy,
     onConfirm = {
       validation = when {
         name.isBlank() -> "Account name is required"
         currencies.none { it.id == currencyId } -> "Choose an available currency"
         else -> null
       }
-      if (validation == null) onSave(name, currencyId)
+      if (validation == null) {
+        val amount = try { if (allowOpeningBalance) OpeningBalance.parse(openingBalance) else 0L }
+        catch (e: IllegalArgumentException) { validation = e.message; return@BrDialog }
+        onSave(name, currencyId, amount)
+      }
     },
   ) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-      BrTextField(name, { name = it; validation = null }, "ACCOUNT NAME")
+      BrTextField(name, { name = it; validation = null }, "ACCOUNT NAME", enabled = !busy)
       (validation ?: saveError)?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
       Text("CURRENCY", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
       Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -319,9 +357,18 @@ internal fun AccountDialog(
           BrChip(c.code, selected = currencyId == c.id, onClick = { currencyId = c.id })
         }
       }
+      if (allowOpeningBalance) OpeningBalanceField(openingBalance, { openingBalance = it; validation = null },
+        "Starting funds for this account. Not counted as income.", enabled = !busy)
       if (onDelete != null) {
         BrButton("Delete account", onDelete, style = com.joeabouserhal.financetracker.ui.components.BrButtonStyle.DANGER, compact = true)
       }
     }
   }
+}
+
+@Composable
+private fun OpeningBalanceField(value: String, onValueChange: (String) -> Unit, description: String, enabled: Boolean = true) {
+  BrTextField(value, onValueChange, "OPENING BALANCE (OPTIONAL)", modifier = Modifier.fillMaxWidth(),
+    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), enabled = enabled)
+  Text(description, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
 }

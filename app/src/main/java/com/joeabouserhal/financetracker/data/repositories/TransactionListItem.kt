@@ -14,6 +14,7 @@ data class TransactionListItem(
   val currencySymbol: String,
   val accountName: String?,
   val destinationAccountName: String? = null,
+  val currencyCode: String = "",
 )
 
 fun enrichTransactions(
@@ -33,6 +34,7 @@ fun enrichTransactions(
       currencySymbol = currencyById[tx.currencyId]?.symbol ?: "",
       accountName = tx.accountId?.let { accountById[it]?.name },
       destinationAccountName = tx.destinationAccountId?.let { accountById[it]?.name },
+      currencyCode = currencyById[tx.currencyId]?.code.orEmpty(),
     )
   }
 }

@@ -192,7 +192,14 @@ private fun BalanceSection(balances: List<CurrencyBalance>) {
   // Only entirely unused currencies are omitted from the balance section.
   val activeBalances = balances.filter { it.hasActivity }
   Column(verticalArrangement = Arrangement.spacedBy(20.dp)) {
-    SectionLabel("BALANCE")
+    Box(Modifier.fillMaxWidth()) {
+      SectionLabel("BALANCE")
+      // The eye is an overlay: its touch target must not increase the label's
+      // layout height and push the currency balances farther down the page.
+      Box(Modifier.matchParentSize(), contentAlignment = Alignment.CenterEnd) {
+        com.joeabouserhal.financetracker.ui.components.AmountVisibilityToggle()
+      }
+    }
     when {
       balances.isEmpty() ->
         EmptyState(message = "No accounts yet — add a currency & account in Settings")
@@ -209,7 +216,7 @@ private fun BalanceSection(balances: List<CurrencyBalance>) {
 }
 
 @Composable
-private fun CurrencyBalanceBlock(balance: CurrencyBalance) {
+internal fun CurrencyBalanceBlock(balance: CurrencyBalance) {
   val spec = LocalThemeSpec.current
   Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
     // Currency group header: quiet caption, nothing that competes with the total.
@@ -235,14 +242,14 @@ private fun CurrencyBalanceBlock(balance: CurrencyBalance) {
         label = "totalAmount",
       )
       Row {
-        Text(
+        com.joeabouserhal.financetracker.ui.components.PrivateAmount(
           balance.currency.symbol,
           style = MaterialTheme.typography.labelLarge.copy(letterSpacing = 0.sp),
           color = spec.muted,
           modifier = Modifier.alignByBaseline(),
         )
         Spacer(Modifier.width(4.dp))
-        Text(
+        com.joeabouserhal.financetracker.ui.components.PrivateAmount(
           Money.format(balance.totalMinor, ""),
           style = MaterialTheme.typography.headlineLarge,
           color = totalColor,
@@ -273,7 +280,7 @@ private fun CurrencyBalanceBlock(balance: CurrencyBalance) {
               targetValue = if (account.balanceMinor < 0) spec.expense else spec.ink,
               label = "accountAmount",
             )
-            Text(
+            com.joeabouserhal.financetracker.ui.components.PrivateAmount(
               compactCurrencyText(account.balanceMinor, account.currency.symbol),
               style = MaterialTheme.typography.labelMedium,
               color = amountColor,
@@ -290,7 +297,7 @@ private fun CurrencyBalanceBlock(balance: CurrencyBalance) {
 // ---------------------------------------------------------------------------
 
 @Composable
-private fun ActivitySection(
+internal fun ActivitySection(
   month: YearMonth,
   onPrevious: () -> Unit,
   onNext: () -> Unit,
@@ -449,12 +456,12 @@ private fun ActivityBlock(activity: MonthlyActivity) {
         }
         Spacer(Modifier.height(4.dp))
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-          Text(
+          com.joeabouserhal.financetracker.ui.components.PrivateAmount(
             compactCurrencyText(activity.expenseMinor, activity.currency.symbol, prefix = "-\u2009"),
             style = MaterialTheme.typography.labelMedium,
             color = spec.expense,
           )
-          Text(
+          com.joeabouserhal.financetracker.ui.components.PrivateAmount(
             compactCurrencyText(activity.incomeMinor, activity.currency.symbol, prefix = "+\u2009"),
             style = MaterialTheme.typography.labelMedium,
             color = spec.income,

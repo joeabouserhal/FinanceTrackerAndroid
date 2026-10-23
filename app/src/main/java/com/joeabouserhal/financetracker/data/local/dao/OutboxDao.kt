@@ -27,12 +27,24 @@ interface OutboxDao {
   @Query("UPDATE outbox SET attempts = :attempts WHERE id = :id")
   suspend fun updateAttempts(id: Long, attempts: Int)
 
-  @Query("UPDATE outbox SET attempts = attempts + 1, last_error = :message, error_kind = :kind, last_attempt_at = :at WHERE id = :id")
+  @Query("UPDATE outbox SET attempts = attempts + 1, last_error = :message, error_kind = :kind, last_attempt_at = :at, state=CASE WHEN :kind='RETRYING' THEN 'RETRYING' ELSE 'ACTION_REQUIRED' END WHERE id = :id")
   suspend fun recordFailure(id: Long, message: String, kind: String, at: String)
+
+  @Query("UPDATE outbox SET error_code=:code, next_attempt_at=:nextAt WHERE id=:id")
+  suspend fun scheduleRetry(id: Long, code: String?, nextAt: String?)
 
   @Query("DELETE FROM outbox WHERE id = :id")
   suspend fun deleteById(id: Long)
 
   @Query("DELETE FROM outbox WHERE owner_id = :ownerId")
   suspend fun deleteForOwner(ownerId: String)
+
+  @Query("UPDATE outbox SET state='PENDING', error_kind=NULL, error_code=NULL, last_error=NULL, next_attempt_at=NULL WHERE owner_id=:ownerId AND batch_id=:batchId")
+  suspend fun retryBatch(ownerId: String, batchId: String)
+
+  @Query("DELETE FROM outbox WHERE owner_id=:ownerId AND batch_id=:batchId")
+  suspend fun discardBatch(ownerId: String, batchId: String)
+
+  @Query("UPDATE outbox SET state='PENDING', error_kind=NULL, error_code=NULL, last_error=NULL, next_attempt_at=NULL WHERE owner_id=:ownerId AND error_kind='AUTH_REQUIRED'")
+  suspend fun resetAuthFailures(ownerId: String)
 }

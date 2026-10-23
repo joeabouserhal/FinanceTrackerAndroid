@@ -33,6 +33,22 @@ private const val USER_ID = "user-1"
 private class FakeSyncApi(
   var authenticated: Boolean = true,
 ) : SyncApi {
+  override suspend fun applyBatch(operations: List<com.joeabouserhal.financetracker.data.local.entities.OutboxEntity>): List<MutationResult?> {
+    val snapshot = server.mapValues { it.value.toMutableList() }
+    val pushedSize = pushed.size
+    val deletedSize = deleted.size
+    try {
+      return operations.map { op ->
+        val spec = SyncTables.ALL.first { it.name == op.tableName }
+        applyMutation(op.tableName, op.action, kotlinx.serialization.json.Json.parseToJsonElement(op.payloadJson) as JsonObject, spec.keyColumn, spec.conflictColumn, op.opId)
+      }
+    } catch (e: Exception) {
+      server.clear(); server.putAll(snapshot)
+      while (pushed.size > pushedSize) pushed.removeAt(pushed.lastIndex)
+      while (deleted.size > deletedSize) deleted.removeAt(deleted.lastIndex)
+      throw e
+    }
+  }
   val pushed = mutableListOf<Pair<String, JsonObject>>() // table to payload
   val deleted = mutableListOf<Pair<String, String>>() // table to id
   val pullCursors = mutableListOf<Pair<String?, String?>>()
@@ -125,7 +141,65 @@ private class FakeSyncApi(
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35], application = android.app.Application::class)
 class SyncEngineTest {
+  @Test fun `opening balance survives push acknowledgment and pull into a second local database`() = runTest {
+    val api = FakeSyncApi()
+    val currency = com.joeabouserhal.financetracker.data.repositories.CurrencyRepository(db.currencyDao(), db)
+      .add(USER_ID, "USD", "$", "Dollar", openingBalanceMinor = 123456)
+    engine(api).sync()
+    assertTrue(db.outboxDao().getAllForOwner(USER_ID).isEmpty())
+    assertEquals(123456L, db.accountDao().getAll(USER_ID).single().openingBalanceMinor)
+    val second = Room.inMemoryDatabaseBuilder(ApplicationProvider.getApplicationContext<Context>(), AppDatabase::class.java).allowMainThreadQueries().build()
+    try {
+      val client = SyncEngine(second, flowOf(Session(USER_ID)), api)
+      client.sync()
+      client.sync()
+      val account = second.accountDao().getAll(USER_ID).single()
+      assertEquals(currency.id, account.currencyId)
+      assertEquals(123456L, account.openingBalanceMinor)
+      assertEquals(123456L, second.transactionDao().observeAccountNets(USER_ID).first().single().balanceMinor)
+      assertTrue(second.transactionDao().getAll(USER_ID).isEmpty())
+    } finally { second.close() }
+  }
   private lateinit var db: AppDatabase
+
+  @Test fun `permanent failure is quarantined until explicitly retried`() = runTest {
+    val fake = FakeSyncApi()
+    var calls = 0
+    var reject = true
+    val api = object : SyncApi by fake {
+      override suspend fun applyBatch(operations: List<com.joeabouserhal.financetracker.data.local.entities.OutboxEntity>): List<MutationResult?> {
+        calls++
+        if (reject) throw IllegalArgumentException("invalid record")
+        return fake.applyBatch(operations)
+      }
+    }
+    val op = OutboxWriter.newOp(USER_ID, "currencies", OutboxAction.INSERT, currencyPayload("cur-1", "USD"))
+    db.outboxDao().insert(op)
+    engine(api).sync()
+    engine(api).sync()
+    assertEquals(1, calls)
+    assertEquals("ACTION_REQUIRED", db.outboxDao().getAllForOwner(USER_ID).single().state)
+    reject = false
+    db.outboxDao().retryBatch(USER_ID, op.batchId)
+    engine(api).sync()
+    assertTrue(db.outboxDao().getAllForOwner(USER_ID).isEmpty())
+  }
+
+  @Test fun `invalid canonical result rolls back every local acknowledgment in a batch`() = runTest {
+    val fake = FakeSyncApi()
+    val first = OutboxWriter.newOp(USER_ID, "currencies", OutboxAction.INSERT, currencyPayload("cur-1", "USD"))
+    val second = OutboxWriter.newOp(USER_ID, "currencies", OutboxAction.INSERT, currencyPayload("cur-2", "EUR")).copy(batchId = first.batchId, batchIndex = 1)
+    db.outboxDao().insert(first); db.outboxDao().insert(second)
+    val api = object : SyncApi by fake {
+      override suspend fun applyBatch(operations: List<com.joeabouserhal.financetracker.data.local.entities.OutboxEntity>) = listOf(
+        MutationResult("applied", currencyPayload("cur-1", "USD")),
+        MutationResult("applied", buildJsonObject { put("user_id", USER_ID); put("id", "cur-2") }),
+      )
+    }
+    engine(api).sync()
+    assertEquals(2, db.outboxDao().getAllForOwner(USER_ID).size)
+    assertTrue(db.currencyDao().getAll(USER_ID).isEmpty())
+  }
 
   @Before
   fun setup() {
@@ -322,6 +396,7 @@ class SyncEngineTest {
 
     // A later successful op still flows through.
     api.failUpsertFor = null
+    db.outboxDao().getAllForOwner(USER_ID).forEach { db.outboxDao().retryBatch(USER_ID, it.batchId) }
     db.outboxDao().insert(OutboxWriter.newOp(USER_ID, "currencies", OutboxAction.INSERT, currencyPayload("cur-9", "USD")))
     val second = engine(api).sync() as SyncOutcome.Completed
     assertEquals(0, second.failedOps)
@@ -335,6 +410,7 @@ class SyncEngineTest {
   fun `cancelled push retains original operation without counting failure`() = runTest {
     val fake = FakeSyncApi()
     val api = object : SyncApi by fake {
+      override suspend fun applyBatch(operations: List<com.joeabouserhal.financetracker.data.local.entities.OutboxEntity>): List<MutationResult?> = throw kotlinx.coroutines.CancellationException("worker stopped")
       override suspend fun upsert(table: String, payload: JsonObject, onConflict: String) {
         throw kotlinx.coroutines.CancellationException("worker stopped")
       }
@@ -386,6 +462,7 @@ class SyncEngineTest {
       put("updated_at", "2026-08-23T11:00:00Z")
     }
     val api = object : SyncApi by fake {
+      override suspend fun applyBatch(operations: List<com.joeabouserhal.financetracker.data.local.entities.OutboxEntity>): List<MutationResult?> = operations.map { MutationResult("stale", canonical) }
       override suspend fun applyMutation(table: String, action: OutboxAction, payload: JsonObject, keyColumn: String, conflictColumn: String, operationId: String) =
         MutationResult("stale", canonical)
     }
@@ -417,12 +494,17 @@ class SyncEngineTest {
     assertTrue(!(engine(api).sync() as SyncOutcome.Completed).isClean)
     assertTrue(db.outboxDao().getAllForOwner(USER_ID).isNotEmpty())
     api.failUpsertFor = null
+    db.outboxDao().getAllForOwner(USER_ID).forEach { db.outboxDao().retryBatch(USER_ID, it.batchId) }
     // A fresh engine represents process restart. Retry must not resurrect the
     // undone withdrawal, even if its delete succeeded before the failed insert.
     val tombstones = mutableSetOf<String>()
     // The real RPC retains delete-before-insert tombstones; simulate that part.
     api.deleted.forEach { (table,id) -> tombstones.add("$table/$id") }
     val guarded = object : SyncApi by api {
+      override suspend fun applyBatch(operations: List<com.joeabouserhal.financetracker.data.local.entities.OutboxEntity>): List<MutationResult?> = operations.map { op ->
+        val spec = SyncTables.ALL.first { it.name == op.tableName }
+        applyMutation(op.tableName, op.action, kotlinx.serialization.json.Json.parseToJsonElement(op.payloadJson) as JsonObject, spec.keyColumn, spec.conflictColumn, op.opId)
+      }
       override suspend fun applyMutation(table: String, action: OutboxAction, payload: JsonObject, keyColumn: String, conflictColumn: String, operationId: String): MutationResult? {
         val id = payload[keyColumn]!!.jsonPrimitive.content
         if ("$table/$id" in tombstones) return MutationResult("deleted", null)

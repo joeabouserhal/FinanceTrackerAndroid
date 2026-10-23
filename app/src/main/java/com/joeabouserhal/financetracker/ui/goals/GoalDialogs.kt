@@ -99,7 +99,7 @@ internal fun GoalCompletionDialog(
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
       Text(goal.name, style = MaterialTheme.typography.titleLarge, color = spec.ink)
       GoalFieldGroup("TOTAL TO WITHDRAW") {
-        Text(compactCurrencyText(goal.targetMinor, symbol), style = MaterialTheme.typography.headlineSmall, color = spec.ink)
+        com.joeabouserhal.financetracker.ui.components.PrivateAmount(compactCurrencyText(goal.targetMinor, symbol), style = MaterialTheme.typography.headlineSmall, color = spec.ink)
       }
       GoalHint("Completing this goal records withdrawals from the accounts below. Review the amounts before confirming.")
       if (eligible.isEmpty()) GoalError("No available account in this currency. Add or reactivate an account first.")
@@ -110,8 +110,8 @@ internal fun GoalCompletionDialog(
       }
       eligible.forEach { account ->
         GoalFieldGroup(account.name) {
-          Text(compactCurrencyText(balances[account.id] ?: 0, symbol, "Available "), style = MaterialTheme.typography.bodySmall, color = spec.muted)
-          if (goal.accountId != null) Text(compactCurrencyText(goal.targetMinor, symbol, "Withdraw "), style = MaterialTheme.typography.titleMedium, color = spec.ink)
+          com.joeabouserhal.financetracker.ui.components.PrivateAmount(compactCurrencyText(balances[account.id] ?: 0, symbol, "Available "), style = MaterialTheme.typography.bodySmall, color = spec.muted)
+          if (goal.accountId != null) com.joeabouserhal.financetracker.ui.components.PrivateAmount(compactCurrencyText(goal.targetMinor, symbol, "Withdraw "), style = MaterialTheme.typography.titleMedium, color = spec.ink)
           else BrTextField(values[account.id].orEmpty(), { value -> values = HashMap(values).apply { put(account.id, value) } },
             "WITHDRAW AMOUNT", enabled = !busy, modifier = Modifier.testTag("allocation-${account.id}"),
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), suffix = { Text(symbol, color = spec.muted) })
@@ -154,7 +154,7 @@ internal fun GoalSuccessDialog(notice: CompletionNotice, onDismiss: () -> Unit) 
       GoalFieldGroup("WITHDRAWALS RECORDED") {
         notice.deductions.forEach { (name, amount) ->
           Text(name, style = MaterialTheme.typography.bodySmall, color = spec.muted)
-          Text(compactCurrencyText(amount, notice.symbol), style = MaterialTheme.typography.titleMedium, color = spec.ink)
+          com.joeabouserhal.financetracker.ui.components.PrivateAmount(compactCurrencyText(amount, notice.symbol), style = MaterialTheme.typography.titleMedium, color = spec.ink)
         }
       }
       GoalHint("Made a mistake? Undo completion from your completed goals.")

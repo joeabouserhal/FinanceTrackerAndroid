@@ -42,8 +42,9 @@ import com.joeabouserhal.financetracker.data.local.entities.RecurringScheduleEnt
       com.joeabouserhal.financetracker.data.local.entities.SyncHealthEntity::class,
       RecurringScheduleEntity::class,
       RecurringOccurrenceEntity::class,
+      com.joeabouserhal.financetracker.data.local.entities.RecurringProgressEntity::class,
     ],
-  version = 15,
+  version = 17,
   exportSchema = true,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -294,6 +295,30 @@ object Migrations {
     }
   }
 
+  val MIGRATION_15_16 = object : Migration(15, 16) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+      db.execSQL("ALTER TABLE `outbox` ADD COLUMN `batch_id` TEXT NOT NULL DEFAULT ''")
+      db.execSQL("ALTER TABLE `outbox` ADD COLUMN `batch_index` INTEGER NOT NULL DEFAULT 0")
+      db.execSQL("ALTER TABLE `outbox` ADD COLUMN `state` TEXT NOT NULL DEFAULT 'PENDING'")
+      db.execSQL("ALTER TABLE `outbox` ADD COLUMN `error_code` TEXT")
+      db.execSQL("ALTER TABLE `outbox` ADD COLUMN `next_attempt_at` TEXT")
+      // Old queues retain their stable operation IDs and original order.
+      db.execSQL("UPDATE `outbox` SET `batch_id` = `op_id`, `state` = CASE WHEN error_kind IN ('ACTION_REQUIRED','AUTH_REQUIRED') THEN 'ACTION_REQUIRED' WHEN attempts > 0 THEN 'RETRYING' ELSE 'PENDING' END")
+      db.execSQL("ALTER TABLE `recurring_occurrences` ADD COLUMN `generation` INTEGER NOT NULL DEFAULT 0")
+      db.execSQL("ALTER TABLE `transactions` ADD COLUMN `recurrence_generation` INTEGER NOT NULL DEFAULT 0")
+      db.execSQL("CREATE TABLE IF NOT EXISTS `recurring_progress` (`owner_id` TEXT NOT NULL, `schedule_id` TEXT NOT NULL, `through_date` TEXT NOT NULL, PRIMARY KEY(`owner_id`,`schedule_id`))")
+      db.execSQL("ALTER TABLE `sync_health` ADD COLUMN `last_push_at` TEXT")
+      db.execSQL("ALTER TABLE `sync_health` ADD COLUMN `last_pull_at` TEXT")
+      db.execSQL("ALTER TABLE `sync_health` ADD COLUMN `conflicts_resolved` INTEGER NOT NULL DEFAULT 0")
+    }
+  }
+
+  val MIGRATION_16_17 = object : Migration(16, 17) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+      db.execSQL("ALTER TABLE `accounts` ADD COLUMN `opening_balance` INTEGER NOT NULL DEFAULT 0")
+    }
+  }
+
   val ALL: Array<Migration> =
-    arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14, MIGRATION_14_15)
+    arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14, MIGRATION_14_15, MIGRATION_15_16, MIGRATION_16_17)
 }

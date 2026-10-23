@@ -67,7 +67,6 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.joeabouserhal.financetracker.R
 import com.joeabouserhal.financetracker.data.local.entities.TransactionEntity
 import com.joeabouserhal.financetracker.data.local.entities.TransactionType
-import com.joeabouserhal.financetracker.data.session.Session
 import com.joeabouserhal.financetracker.theme.LocalThemeSpec
 import com.joeabouserhal.financetracker.ui.components.BrButton
 import com.joeabouserhal.financetracker.ui.components.BrChip
@@ -88,23 +87,31 @@ import kotlinx.coroutines.launch
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun TransactionFormScreen(
+  ownerId: String,
   transactionId: String?,
   presetId: String? = null,
   onBack: () -> Unit,
   onSaved: () -> Unit,
   modifier: Modifier = Modifier,
   transferMode: Boolean = false,
+  duplicateId: String? = null,
 ) {
   val container = rememberAppContainer()
   val scope = rememberCoroutineScope()
   val spec = LocalThemeSpec.current
-  val session by container.sessionManager.session.collectAsStateWithLifecycle(initialValue = Session())
-  val ownerId = session.ownerId
+  // Navigation supplies the resolved active partition. A temporary guest fallback
+  // here can falsely mark an account transaction missing before its data loads.
+  val formScroll = rememberScrollState()
+  var initialized by rememberSaveable(ownerId, transactionId, presetId, duplicateId) { mutableStateOf(false) }
+  var saveNotice by remember { mutableStateOf<String?>(null) }
 
   val currencies by remember(ownerId) { container.currencyRepository.observeAll(ownerId) }
     .collectAsStateWithLifecycle(initialValue = emptyList())
   val accounts by remember(ownerId) { container.accountRepository.observeAll(ownerId) }
     .collectAsStateWithLifecycle(initialValue = emptyList())
+  val accountNets by remember(ownerId) { container.appDatabase.transactionDao().observeAccountNets(ownerId) }
+    .collectAsStateWithLifecycle(initialValue = emptyList())
+  var originalTransaction by remember(ownerId, transactionId) { mutableStateOf<TransactionEntity?>(null) }
 
   var type by rememberSaveable { mutableStateOf(if (transferMode) TransactionType.TRANSFER else TransactionType.EXPENSE) }
   var amountText by rememberSaveable { mutableStateOf("") }
@@ -160,23 +167,31 @@ fun TransactionFormScreen(
     transactionId != null && (it.id == selectedAccountId || it.id == destinationAccountId)) }
 
   // Load existing transaction for edit mode.
-  LaunchedEffect(transactionId, ownerId) {
-    val existing = transactionId?.let { container.appDatabase.transactionDao().getById(ownerId, it) }
-    if (existing != null) {
-      type = existing.type
+  LaunchedEffect(transactionId, duplicateId, ownerId) {
+    val existing = (transactionId ?: duplicateId)?.let { container.appDatabase.transactionDao().getById(ownerId, it) }
+    if (transactionId != null) originalTransaction = existing?.takeIf { it.deletedAt == null }
+    if (initialized) return@LaunchedEffect
+    if (existing != null && existing.deletedAt == null) {
+      val draft = duplicateId?.let { TransactionDraft.duplicate(existing, Dates.todayIso()) }
+      type = draft?.type ?: existing.type
       amountText = formatAmountForInput(existing.amount)
       selectedCurrencyId = existing.currencyId
       selectedAccountId = existing.accountId
       destinationAccountId = existing.destinationAccountId
       selectedCategoryId = existing.categoryId
-      date = existing.date
+      date = draft?.date ?: existing.date
       title = existing.title.orEmpty()
       notes = existing.notes.orEmpty()
+      error = null
+      initialized = true
+    } else if (transactionId != null || duplicateId != null) {
+      error = "The original transaction is no longer available."
     }
   }
 
   // Pre-fill the form from a picked preset (add-from-preset flow).
   LaunchedEffect(presetId, ownerId) {
+    if (initialized) return@LaunchedEffect
     val preset = presetId?.let { container.appDatabase.presetDao().getById(ownerId, it) }
     if (preset != null) {
       type = preset.type
@@ -185,6 +200,7 @@ fun TransactionFormScreen(
       preset.defaultAccountId?.let { selectedAccountId = it }
       preset.defaultCategoryId?.let { selectedCategoryId = it }
       title = preset.name
+      initialized = true
     }
   }
 
@@ -233,7 +249,7 @@ fun TransactionFormScreen(
     }
   }
 
-  fun save() {
+  fun save(addAnother: Boolean = false) {
     if (saving) return
     when (val calculation = amountCalculation) {
       is AmountExpressionResult.Valid -> {
@@ -294,7 +310,16 @@ fun TransactionFormScreen(
             presetId = null,
           )
         }
-        onSaved()
+        if (addAnother && transactionId == null) {
+          amountText = ""
+          title = ""
+          notes = ""
+          error = null
+          saveNotice = "Saved. Ready for the next entry."
+          formScroll.animateScrollTo(0)
+        } else onSaved()
+      } catch (e: kotlinx.coroutines.CancellationException) {
+        throw e
       } catch (e: Exception) {
         error = e.message ?: "Could not save"
       } finally {
@@ -368,10 +393,11 @@ fun TransactionFormScreen(
     Column(
       Modifier
         .weight(1f)
-        .verticalScroll(remember { ScrollState(0) })
+        .verticalScroll(formScroll)
         .padding(horizontal = 16.dp),
       verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
+      saveNotice?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = spec.muted) }
       val selectedCurrency = currencies.firstOrNull { it.id == selectedCurrencyId }
       AmountEditor(
         value = amountText,
@@ -439,6 +465,25 @@ fun TransactionFormScreen(
             destinationAccountId = source
           },
         )
+        val preview = remember(accountNets, originalTransaction, selectedAccountId, destinationAccountId, amountText) {
+          runCatching {
+            transferBalanceChanges(accountNets.associate { it.accountId.orEmpty() to it.balanceMinor },
+              originalTransaction, requireNotNull(selectedAccountId), requireNotNull(destinationAccountId),
+              BigDecimal(Money.normalizeDecimalInput(amountText)).setScale(2, RoundingMode.HALF_UP).movePointRight(2).longValueExact())
+          }.getOrNull()
+        }
+        if (hasPositivePlainAmount && preview != null) {
+          Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+            listOf(selectedAccountId to preview.first, destinationAccountId to preview.second).forEach { (id, change) ->
+              Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(accountOptions.firstOrNull { it.id == id }?.name.orEmpty(), style = MaterialTheme.typography.labelSmall, color = spec.muted)
+                com.joeabouserhal.financetracker.ui.components.PrivateAmount(
+                  "${Money.format(change.before, selectedCurrency?.symbol.orEmpty())} → ${Money.format(change.after, selectedCurrency?.symbol.orEmpty())}",
+                  style = MaterialTheme.typography.bodySmall, color = spec.ink)
+              }
+            }
+          }
+        }
         BrTextField(value = title, onValueChange = { title = it }, label = "TITLE (OPTIONAL)", modifier = Modifier.fillMaxWidth())
       } else Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
         SectionLabel("CATEGORY")
@@ -518,6 +563,14 @@ fun TransactionFormScreen(
               else if (transactionId == null) "ADD TRANSACTION" else "UPDATE TRANSACTION",
               onClick = { save() },
               enabled = hasPositivePlainAmount && !saving && (!isTransfer || destinationAccountId != null && destinationAccountId != selectedAccountId),
+              modifier = Modifier.fillMaxWidth(),
+            )
+            if (transactionId == null) BrButton(
+              text = "SAVE & ADD ANOTHER",
+              onClick = { save(addAnother = true) },
+              enabled = hasPositivePlainAmount && !saving && (!isTransfer || destinationAccountId != null && destinationAccountId != selectedAccountId),
+              style = com.joeabouserhal.financetracker.ui.components.BrButtonStyle.OUTLINE,
+              compact = true,
               modifier = Modifier.fillMaxWidth(),
             )
             if (transactionId != null) {

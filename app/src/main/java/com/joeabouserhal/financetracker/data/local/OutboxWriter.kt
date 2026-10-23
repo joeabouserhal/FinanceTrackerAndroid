@@ -13,6 +13,7 @@ import com.joeabouserhal.financetracker.data.local.entities.RecurringScheduleEnt
 import com.joeabouserhal.financetracker.data.local.entities.TransactionEntity
 import com.joeabouserhal.financetracker.data.sync.SyncVersion
 import java.time.Instant
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
@@ -49,9 +50,9 @@ object OutboxWriter {
       "UPDATE `$table` SET sync_version=? WHERE owner_id=? AND `$key`=?",
       arrayOf(version, ownerId, id),
     )
-    db.outboxDao().insert(newOp(ownerId, table, action, payload))
-    // Tell the Application layer a mutation just happened → immediate sync.
-    com.joeabouserhal.financetracker.data.sync.SyncRequests.notifyMutation()
+    val mutation = currentCoroutineContext()[LocalMutation]
+    val op = newOp(ownerId, table, action, payload)
+    db.outboxDao().insert(if (mutation == null) op else op.copy(batchId = mutation.id, batchIndex = mutation.index++))
   }
 
   fun newOp(ownerId: String, table: String, action: OutboxAction, payload: JsonObject): OutboxEntity =
@@ -93,6 +94,7 @@ object OutboxWriter {
         "name" to JsonPrimitive(e.name),
         "archived" to JsonPrimitive(e.archived),
         "is_default" to JsonPrimitive(e.isDefault),
+        "opening_balance" to JsonPrimitive(e.openingBalanceMinor),
       ),
     )
 
@@ -138,6 +140,7 @@ object OutboxWriter {
         "preset_id" to (e.presetId?.let { JsonPrimitive(it) } ?: JsonNull),
         "goal_id" to (e.goalId?.let { JsonPrimitive(it) } ?: JsonNull),
         "recurrence_occurrence_id" to (e.recurrenceOccurrenceId?.let { JsonPrimitive(it) } ?: JsonNull),
+        "recurrence_generation" to JsonPrimitive(e.recurrenceGeneration),
       ),
     )
 
@@ -157,6 +160,7 @@ object OutboxWriter {
       "schedule_id" to JsonPrimitive(e.scheduleId), "occurrence_key" to JsonPrimitive(e.occurrenceKey),
       "state" to JsonPrimitive(e.state.name.lowercase()), "effective_at" to JsonPrimitive(e.effectiveAt),
       "transaction_id" to (e.transactionId?.let(::JsonPrimitive) ?: JsonNull),
+      "generation" to JsonPrimitive(e.generation),
     ))
 
   fun profile(ownerId: String, e: ProfileEntity): JsonObject =

@@ -6,7 +6,8 @@ import java.time.YearMonth
 import java.util.Locale
 
 object Money {
-  private val formatter = NumberFormat.getIntegerInstance(Locale.US)
+  // Search/export format in background dispatchers while Compose formats on main.
+  private val formatter = ThreadLocal.withInitial { NumberFormat.getIntegerInstance(Locale.US) }
 
   /**
    * Normalizes user-typed amounts for BigDecimal parsing: "12,50" becomes
@@ -18,10 +19,9 @@ object Money {
   /** Format minor units (cents) with the currency symbol, e.g. 123456 -> "$1,234.56". */
   fun format(minor: Long, symbol: String, forceDecimals: Boolean = false): String {
     val sign = if (minor < 0) "-" else ""
-    val abs = kotlin.math.abs(minor)
-    val whole = abs / 100
-    val fraction = (abs % 100).toInt()
-    val grouped = formatter.format(whole)
+    val whole = kotlin.math.abs(minor / 100)
+    val fraction = kotlin.math.abs(minor % 100).toInt()
+    val grouped = requireNotNull(formatter.get()).format(whole)
     val decimals = if (fraction == 0 && !forceDecimals) "" else ".${fraction.toString().padStart(2, '0')}"
     return "$sign$symbol$grouped$decimals"
   }

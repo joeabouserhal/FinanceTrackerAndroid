@@ -15,6 +15,22 @@ import io.github.jan.supabase.postgrest.Postgrest
 class SupabaseClientProvider(context: Context) {
   private val appContext = context.applicationContext
 
+  /** Recovery must never replace the account used by sync, even for a different email. */
+  val recoveryClient: SupabaseClient? by lazy {
+    if (!SupabaseConfig.isConfigured) null else createSupabaseClient(SupabaseConfig.url, SupabaseConfig.anonKey) {
+      install(Auth) {
+        autoLoadFromStorage = false
+        autoSaveToStorage = false
+        alwaysAutoRefresh = false
+        sessionManager = io.github.jan.supabase.auth.MemorySessionManager()
+        codeVerifierCache = io.github.jan.supabase.auth.SettingsCodeVerifierCache(
+          com.russhwolf.settings.SharedPreferencesSettings(appContext.getSharedPreferences("password_recovery", Context.MODE_PRIVATE)),
+        )
+        flowType = io.github.jan.supabase.auth.FlowType.PKCE
+      }
+    }
+  }
+
   val client: SupabaseClient? by lazy {
     if (!SupabaseConfig.isConfigured) {
       null

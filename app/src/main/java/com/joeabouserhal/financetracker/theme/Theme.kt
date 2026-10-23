@@ -27,7 +27,10 @@ fun FinanceTrackerTheme(onReady: () -> Unit = {}, content: @Composable () -> Uni
     initialValue = null,
   )
   if (selection != null) SideEffect { onReady() }
-  FinanceTrackerTheme(spec = resolveSpec(selection ?: ThemeSelection()), content = content)
+  val hidden by app.container.settingsRepository.amountsHidden.collectAsStateWithLifecycle(initialValue = true)
+  CompositionLocalProvider(com.joeabouserhal.financetracker.ui.components.LocalAmountsHidden provides hidden) {
+    FinanceTrackerTheme(spec = resolveSpec(selection ?: ThemeSelection()), content = content)
+  }
 }
 
 /** Preview/test-friendly overload: render a fixed spec directly. */

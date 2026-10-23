@@ -65,12 +65,14 @@ fun MainTabs(
   onEditTransaction: (String) -> Unit,
   onOpenCurrenciesAccounts: () -> Unit,
   onOpenThemes: () -> Unit,
+  onOpenAppLock: () -> Unit,
   onOpenCategories: () -> Unit,
   onOpenPresets: () -> Unit,
   onOpenCompletedGoals: () -> Unit,
   onOpenAuth: () -> Unit,
   modifier: Modifier = Modifier,
   onTransfer: () -> Unit = {},
+  onDuplicateTransaction: (String) -> Unit = {},
 ) {
   var selectedTab by rememberSaveable { mutableStateOf(MainTab.DASHBOARD) }
 
@@ -100,6 +102,7 @@ fun MainTabs(
                 onSeeAllTransactions = { selectedTab = MainTab.TRANSACTIONS },
               )
             MainTab.TRANSACTIONS -> TransactionsScreen(
+              onDuplicateTransaction = onDuplicateTransaction,
               onTransfer = onTransfer,
               onAddTransaction = onAddTransaction,
               onAddFromPreset = onOpenPresetPicker,
@@ -110,6 +113,7 @@ fun MainTabs(
             MainTab.OPTIONS -> OptionsScreen(
               onOpenCurrenciesAccounts = onOpenCurrenciesAccounts,
               onOpenThemes = onOpenThemes,
+              onOpenAppLock = onOpenAppLock,
               onOpenCategories = onOpenCategories,
               onOpenPresets = onOpenPresets,
               onSignIn = onOpenAuth,

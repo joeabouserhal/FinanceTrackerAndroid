@@ -23,4 +23,9 @@ data class OutboxEntity(
   @ColumnInfo(name = "last_error") val lastError: String? = null,
   @ColumnInfo(name = "error_kind") val errorKind: String? = null,
   @ColumnInfo(name = "last_attempt_at") val lastAttemptAt: String? = null,
+  @ColumnInfo(name = "batch_id", defaultValue = "''") val batchId: String = opId,
+  @ColumnInfo(name = "batch_index", defaultValue = "0") val batchIndex: Int = 0,
+  @ColumnInfo(defaultValue = "'PENDING'") val state: String = "PENDING",
+  @ColumnInfo(name = "error_code") val errorCode: String? = null,
+  @ColumnInfo(name = "next_attempt_at") val nextAttemptAt: String? = null,
 )

@@ -44,9 +44,9 @@ sealed interface SyncOutcome {
  *
  * Flow per run:
  *  1. Guest is always skipped — its partition never touches the network.
- *  2. Drain the outbox in FK order (parents first), one idempotent op at a
- *     time; a successful op is removed from the queue, a failed op keeps its
- *     place and gets its attempt counter bumped.
+ *  2. Drain immutable logical batches in FK order; apply canonical results and
+ *     acknowledge the whole batch locally in one transaction. Transient failures
+ *     back off; permanent failures remain visible but are not automatically retried.
  *  3. Pull every table with a keyset watermark over (updated_at, id) and apply
  *     rows using their hybrid-clock versions; deletion remains permanent.
  */
@@ -76,52 +76,82 @@ class SyncEngine(
     val priorHealth = db.syncHealthDao().get(current.ownerId)
     try {
       if (!syncApi.ensureAuthenticatedFor(current.ownerId)) {
-        db.syncHealthDao().upsert(SyncHealthEntity(current.ownerId, priorHealth?.lastSuccessAt, "Sign in again to resume sync.", "AUTH_REQUIRED"))
+        db.syncHealthDao().upsert((priorHealth ?: SyncHealthEntity(current.ownerId)).copy(lastError = "Sign in again to resume sync.", errorKind = "AUTH_REQUIRED"))
         return SyncOutcome.Skipped(SyncOutcome.SkipReason.NO_SESSION)
       }
     } catch (e: CancellationException) {
       throw e
     } catch (e: Exception) {
       val failure = SyncFailure.from(e)
-      db.syncHealthDao().upsert(SyncHealthEntity(current.ownerId, priorHealth?.lastSuccessAt, failure.message, failure.kind))
+      db.syncHealthDao().upsert((priorHealth ?: SyncHealthEntity(current.ownerId)).copy(lastError = failure.message, errorKind = failure.kind))
       return SyncOutcome.Completed(0, 0, 1, 0, false).also { latestOutcome.value = it }
     }
 
     var pushed = 0
     var failedOps = 0
     var deadOps = 0
+    var conflictsResolved = 0
     var firstFailure: SyncFailure? = null
-    for (spec in SyncTables.ALL) {
-      for (op in db.outboxDao().getAllForOwnerAndTable(current.ownerId, spec.name)) {
-        currentCoroutineContext().ensureActive()
-        if (session.first() != current) return SyncOutcome.Skipped(SyncOutcome.SkipReason.NO_SESSION)
-        try {
-          val result = pushOp(syncApi, op, spec)
-          db.withTransaction {
+    val pending = db.outboxDao().getAllForOwner(current.ownerId)
+    val ranks = SyncTables.ALL.mapIndexed { index, spec -> spec.name to index }.toMap()
+    val batches = pending.groupBy { it.batchId }.values
+      .sortedBy { batch -> batch.minOf { ranks[it.tableName] ?: Int.MAX_VALUE } }
+    for (batch in batches) {
+      currentCoroutineContext().ensureActive()
+      if (session.first() != current) return SyncOutcome.Skipped(SyncOutcome.SkipReason.NO_SESSION)
+      if (batch.any { it.state == "ACTION_REQUIRED" }) { deadOps += batch.size; continue }
+      if (batch.any { it.nextAttemptAt?.let { at -> Instant.parse(at).isAfter(Instant.now()) } == true }) {
+        failedOps += batch.size
+        break
+      }
+      val ordered = batch.sortedWith(compareBy({ ranks[it.tableName] ?: Int.MAX_VALUE }, { it.batchIndex }, { it.id }))
+      try {
+        val results = syncApi.applyBatch(ordered)
+        check(results.size == ordered.size) { "Incomplete batch acknowledgment" }
+        db.withTransaction {
+          ordered.zip(results).forEach { (op, result) ->
+            val spec = SyncTables.ALL.first { it.name == op.tableName }
+            val payload = Json.parseToJsonElement(op.payloadJson).jsonObject
             if (result?.row != null) {
+              if (result.status == "superseded" && spec.name != "profiles") {
+                db.openHelper.writableDatabase.execSQL(
+                  "UPDATE `${spec.name}` SET sync_version='' WHERE owner_id=? AND id=? AND sync_version=?",
+                  arrayOf(current.ownerId, payload.req(spec.keyColumn), payload.req("sync_version")),
+                )
+              }
               applyRows(current.ownerId, spec.name, listOf(result.row))
-            } else if (result?.status == "deleted" && spec.name != "profiles") {
-              val payload = Json.parseToJsonElement(op.payloadJson).jsonObject
+            }
+            if ((result?.row != null && result.row[spec.keyColumn] != payload[spec.keyColumn] || result?.row == null && result?.status in setOf("deleted", "superseded")) && spec.name != "profiles") {
+              // Do not hide a later local edit queued while this batch was in flight.
               db.openHelper.writableDatabase.execSQL(
-                "UPDATE `${spec.name}` SET deleted_at=coalesce(deleted_at,?) WHERE owner_id=? AND id=?",
-                arrayOf(Instant.now().toString(), current.ownerId, payload.req(spec.keyColumn)),
+                "UPDATE `${spec.name}` SET deleted_at=coalesce(deleted_at,?) WHERE owner_id=? AND id=? AND sync_version=?",
+                arrayOf(Instant.now().toString(), current.ownerId, payload.req(spec.keyColumn), payload.req("sync_version")),
               )
             }
             db.outboxDao().deleteById(op.id)
           }
-          pushed++
-        } catch (e: CancellationException) {
-          throw e
-        } catch (e: Exception) {
-          val failure = SyncFailure.from(e)
-          db.outboxDao().recordFailure(op.id, "${spec.name}: ${failure.message}", failure.kind, Instant.now().toString())
-          if (failure.kind == "RETRYING") failedOps++ else deadOps++
-          if (firstFailure == null) firstFailure = failure
-          Log.w(TAG, "push op ${op.id} (${spec.name}/${op.action}) failed: ${e.message}", e)
         }
+        pushed += ordered.size
+        conflictsResolved += results.count { it?.status in setOf("stale", "superseded") }
+      } catch (e: CancellationException) { throw e }
+      catch (e: Exception) {
+        val failure = SyncFailure.from(e)
+        db.withTransaction {
+          val code = (e as? io.github.jan.supabase.postgrest.exception.PostgrestRestException)?.code
+          ordered.forEach { op ->
+            val kind = if (code == "23503" && op.attempts >= 2) "ACTION_REQUIRED" else failure.kind
+            db.outboxDao().recordFailure(op.id, "${op.tableName}: ${failure.message}", kind, Instant.now().toString())
+            val delay = (30L * (1L shl op.attempts.coerceAtMost(10))).coerceAtMost(21_600)
+            db.outboxDao().scheduleRetry(op.id, code, if (kind == "RETRYING") Instant.now().plusSeconds(delay).toString() else null)
+          }
+        }
+        if (failure.kind == "RETRYING") failedOps += ordered.size else deadOps += ordered.size
+        if (firstFailure == null) firstFailure = failure
+        Log.w(TAG, "Push batch failed: ${failure.kind}", e)
+        // Later actions may depend on this batch; preserve causality until it retries.
+        break
       }
     }
-
     var pulled = 0
     var pullFailed = false
     for (spec in SyncTables.ALL) {
@@ -140,14 +170,13 @@ class SyncEngine(
 
     Log.i(TAG, "sync done: pushed=$pushed pulled=$pulled failedOps=$failedOps deadOps=$deadOps pullFailed=$pullFailed")
     db.syncHealthDao().upsert(
-      SyncHealthEntity(current.ownerId, if (firstFailure == null) Instant.now().toString() else priorHealth?.lastSuccessAt, firstFailure?.message, firstFailure?.kind),
+      SyncHealthEntity(current.ownerId, if (firstFailure == null && deadOps == 0 && failedOps == 0) Instant.now().toString() else priorHealth?.lastSuccessAt,
+        firstFailure?.message, firstFailure?.kind,
+        if (pushed > 0) Instant.now().toString() else priorHealth?.lastPushAt,
+        if (!pullFailed) Instant.now().toString() else priorHealth?.lastPullAt,
+        (priorHealth?.conflictsResolved ?: 0) + conflictsResolved),
     )
     return SyncOutcome.Completed(pushed, pulled, failedOps, deadOps, pullFailed).also { latestOutcome.value = it }
-  }
-
-  private suspend fun pushOp(api: SyncApi, op: OutboxEntity, spec: SyncTables.Spec): MutationResult? {
-    val payload = Json.parseToJsonElement(op.payloadJson).jsonObject
-    return api.applyMutation(op.tableName, op.action, payload, spec.keyColumn, spec.conflictColumn, op.opId)
   }
 
   /** Returns the number of rows pulled. Advances the watermark only on success. */

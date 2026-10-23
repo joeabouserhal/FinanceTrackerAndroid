@@ -1,6 +1,7 @@
 package com.joeabouserhal.financetracker.ui.auth
 
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -67,6 +68,10 @@ fun AuthScreen(
   var error by remember { mutableStateOf<String?>(null) }
   var busy by remember { mutableStateOf(false) }
   var showPassword by rememberSaveable { mutableStateOf(false) }
+  var showRecovery by remember { mutableStateOf(false) }
+  var recoveryBusy by remember { mutableStateOf(false) }
+  var recoverySent by remember { mutableStateOf(false) }
+  var recoveryError by remember { mutableStateOf<String?>(null) }
 
   fun finish(result: AuthResult) {
     busy = false
@@ -127,6 +132,11 @@ fun AuthScreen(
           trailingIconDescription = if (showPassword) "Hide password" else "Show password",
           onTrailingIconClick = { showPassword = !showPassword },
         )
+
+        if (mode == AuthMode.SIGN_IN) Text("FORGOT PASSWORD?", style = MaterialTheme.typography.labelMedium,
+          color = spec.accent, modifier = Modifier.fillMaxWidth().clickable(enabled = !busy,
+            role = androidx.compose.ui.semantics.Role.Button) { showRecovery = true; recoverySent = false; recoveryError = null }
+            .padding(vertical = 12.dp))
 
         error?.let {
           Text(
@@ -212,5 +222,28 @@ fun AuthScreen(
       color = spec.muted,
     )
     Spacer(Modifier.height(8.dp))
+  }
+  if (showRecovery) com.joeabouserhal.financetracker.ui.components.BrDialog(
+    title = "RESET PASSWORD", onDismiss = { if (!recoveryBusy) showRecovery = false }, dismissText = if (recoveryBusy) null else "CLOSE",
+  ) {
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+      if (recoverySent) Text("If an account exists for this email, a reset link is on its way. Open it on this phone, then choose a new password. Check your spam folder too.", color = spec.ink)
+      else {
+        Text("We’ll email you a link to choose a new password. Open it on this phone.", color = spec.muted)
+        BrTextField(email, { email = it; recoveryError = null }, "EMAIL", modifier = Modifier.fillMaxWidth(),
+          enabled = !recoveryBusy, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email))
+        recoveryError?.let { Text(it, color = spec.expense) }
+        BrButton(if (recoveryBusy) "SENDING…" else "SEND RESET LINK", enabled = !recoveryBusy && email.isNotBlank(), onClick = {
+          recoveryBusy = true; recoveryError = null
+          scope.launch {
+            when (val result = container.authRepository.requestPasswordReset(email)) {
+              com.joeabouserhal.financetracker.data.auth.AuthActionResult.Success -> recoverySent = true
+              is com.joeabouserhal.financetracker.data.auth.AuthActionResult.Error -> recoveryError = result.message
+            }
+            recoveryBusy = false
+          }
+        })
+      }
+    }
   }
 }

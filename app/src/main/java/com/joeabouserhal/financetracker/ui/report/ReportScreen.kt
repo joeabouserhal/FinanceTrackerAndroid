@@ -40,6 +40,7 @@ import com.joeabouserhal.financetracker.ui.rememberAppContainer
 import com.joeabouserhal.financetracker.ui.transactions.*
 import com.joeabouserhal.financetracker.utils.Money
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flowOn
 import java.time.LocalDate
 import java.time.YearMonth
 import java.time.format.DateTimeFormatter
@@ -69,17 +70,23 @@ fun ReportScreen(modifier: Modifier = Modifier) {
   val session by container.sessionManager.session.collectAsStateWithLifecycle(initialValue = null)
   val owner = session?.ownerId ?: return
   var today by remember { mutableStateOf(LocalDate.now()) }
+  var queryPeriod by rememberSaveable(owner, stateSaver = PeriodSaver) { mutableStateOf(ReportPeriod(month = YearMonth.from(today))) }
+  val queryWindow = queryPeriod.window(today)
+  val previousWindow = queryPeriod.previous(today)
+  val queryStart = listOfNotNull(queryWindow?.start, previousWindow?.start).minOrNull()
+  val queryEnd = listOfNotNull(queryWindow?.end, previousWindow?.end).maxOrNull()
   LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { today = LocalDate.now() }
-  val data by remember(owner) {
+  val data by remember(owner, queryStart, queryEnd) {
     combine(
-      container.transactionRepository.observeAll(owner),
+      if (queryWindow == null) container.transactionRepository.observeAll(owner)
+      else container.transactionRepository.observeBetween(owner, requireNotNull(queryStart).toString(), requireNotNull(queryEnd).toString()),
       container.categoryRepository.observeByType(owner, TransactionType.INCOME),
       container.categoryRepository.observeByType(owner, TransactionType.EXPENSE),
       container.accountRepository.observeActive(owner),
       container.currencyRepository.observeAll(owner),
     ) { transactions, income, expense, accounts, currencies ->
       owner to Triple(enrichTransactions(transactions, income + expense, accounts, currencies), currencies, accounts)
-    }
+    }.flowOn(kotlinx.coroutines.Dispatchers.Default)
   }.collectAsStateWithLifecycle(initialValue = null)
   // StateFlow collection may briefly retain the previous flow's value during
   // an owner switch. Never render that snapshot in the new account partition.
@@ -89,6 +96,7 @@ fun ReportScreen(modifier: Modifier = Modifier) {
     return
   }
   ReportContent(ownerId = owner, items = current.first, currencies = current.second, today = today,
+    onPeriodChange = { queryPeriod = it },
     activeAccountCurrencies = current.third.associate { it.id to it.currencyId }, modifier = modifier,
     refinementPanel = { filters, update, type ->
       FilterPanel(filters, update, typeHint = type, showTypeRow = false, showDateRow = false, showSortRow = false, showCurrencyRow = false)
@@ -104,33 +112,21 @@ internal fun ReportContent(
   today: LocalDate,
   activeAccountCurrencies: Map<String, String> = emptyMap(),
   modifier: Modifier = Modifier,
+  onPeriodChange: (ReportPeriod) -> Unit = {},
   refinementPanel: @Composable (TransactionFilterState, (TransactionFilterState) -> Unit, TypeFilter) -> Unit = { _, _, _ -> },
 ) {
   val spec = LocalThemeSpec.current
-  var savedOwner by rememberSaveable { mutableStateOf(ownerId) }
-  var period by rememberSaveable(stateSaver = PeriodSaver) { mutableStateOf(ReportPeriod(month = YearMonth.from(today))) }
-  var filters by rememberSaveable(stateSaver = TransactionFilterStateSaver) { mutableStateOf(TransactionFilterState()) }
-  var viewType by rememberSaveable { mutableStateOf(TransactionType.EXPENSE) }
-  var filtersOpen by rememberSaveable { mutableStateOf(false) }
-  var periodOpen by rememberSaveable { mutableStateOf(false) }
-  var expanded by rememberSaveable { mutableStateOf(emptyList<String>()) }
-  var detailCurrency by rememberSaveable { mutableStateOf<String?>(null) }
-  var detailCategory by rememberSaveable { mutableStateOf<String?>(null) }
-  var currencyChoice by rememberSaveable { mutableStateOf<String?>(null) }
-  var selectedBucket by rememberSaveable { mutableStateOf<Int?>(null) }
-  if (savedOwner != ownerId) {
-    savedOwner = ownerId
-    period = ReportPeriod(month = YearMonth.from(today))
-    filters = TransactionFilterState()
-    viewType = TransactionType.EXPENSE
-    filtersOpen = false
-    periodOpen = false
-    expanded = emptyList()
-    detailCurrency = null
-    detailCategory = null
-    currencyChoice = null
-    selectedBucket = null
-  }
+  var period by rememberSaveable(ownerId, stateSaver = PeriodSaver) { mutableStateOf(ReportPeriod(month = YearMonth.from(today))) }
+  LaunchedEffect(period) { onPeriodChange(period) }
+  var filters by rememberSaveable(ownerId, stateSaver = TransactionFilterStateSaver) { mutableStateOf(TransactionFilterState()) }
+  var viewType by rememberSaveable(ownerId) { mutableStateOf(TransactionType.EXPENSE) }
+  var filtersOpen by rememberSaveable(ownerId) { mutableStateOf(false) }
+  var periodOpen by rememberSaveable(ownerId) { mutableStateOf(false) }
+  var expanded by rememberSaveable(ownerId) { mutableStateOf(emptyList<String>()) }
+  var detailCurrency by rememberSaveable(ownerId) { mutableStateOf<String?>(null) }
+  var detailCategory by rememberSaveable(ownerId) { mutableStateOf<String?>(null) }
+  var currencyChoice by rememberSaveable(ownerId) { mutableStateOf<String?>(null) }
+  var selectedBucket by rememberSaveable(ownerId) { mutableStateOf<Int?>(null) }
   val currencyOptions = currencies.sortedByDescending { it.isDefault }
   val selectedCurrency = currencyOptions.firstOrNull { it.id == currencyChoice } ?: currencyOptions.firstOrNull()
   val allowedAccounts = activeAccountCurrencies.filterValues { it == selectedCurrency?.id }.keys
@@ -140,8 +136,10 @@ internal fun ReportContent(
     currencyChoice = selectedCurrency?.id
     filters = filters.copy(currencyIds = emptySet(), accountIds = filters.accountIds.intersect(allowedAccounts))
   }
-  val reports = remember(items, currencies, reportFilters, period, viewType, today) {
-    buildReports(items, currencies, viewType, period, reportFilters, today)
+  val reports by produceState(emptyList<CurrencyReport>(), items, currencies, reportFilters, period, viewType, today) {
+    value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+      buildReports(items, currencies, viewType, period, reportFilters, today)
+    }
   }
   LaunchedEffect(period, reportFilters, viewType, selectedCurrency?.id) {
     selectedBucket = null
@@ -321,7 +319,7 @@ private fun ReportHeadline(report: CurrencyReport, viewType: TransactionType, pe
   Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
     Text("${report.code} · ${report.name}", style = MaterialTheme.typography.labelMedium, color = spec.muted)
     Text(if (viewType == TransactionType.EXPENSE) "TOTAL SPENT" else "TOTAL EARNED", style = MaterialTheme.typography.labelSmall, color = spec.muted)
-    Text(compactCurrencyText(report.totalMinor, report.symbol), style = MaterialTheme.typography.headlineLarge, color = tone, fontWeight = FontWeight.Bold)
+    com.joeabouserhal.financetracker.ui.components.PrivateAmount(compactCurrencyText(report.totalMinor, report.symbol), style = MaterialTheme.typography.headlineLarge, color = tone, fontWeight = FontWeight.Bold)
     Text("${report.count} transaction${if (report.count == 1) "" else "s"}", style = MaterialTheme.typography.bodySmall, color = spec.muted)
     if (report.previousTotalMinor != null && report.changePercent != null) {
       val comparisonLabel = when (period.kind) {
@@ -352,6 +350,7 @@ private fun TrendChart(
 ) {
   val spec = LocalThemeSpec.current
   val buckets = report.buckets
+  val hiddenAmounts = com.joeabouserhal.financetracker.ui.components.LocalAmountsHidden.current
   val selectedBucket = selected?.let { buckets.getOrNull(it) }
   val maximum = buckets.maxOfOrNull { it.amountMinor }?.coerceAtLeast(1L) ?: 1L
   val labelFormat = if (period.kind == ReportPeriodKind.YEAR) DateTimeFormatter.ofPattern("MMM") else DateTimeFormatter.ofPattern("d")
@@ -382,7 +381,7 @@ private fun TrendChart(
               .width(barWidth)
               .fillMaxHeight()
               .testTag("bucket:${report.currencyId}:$index")
-              .semantics { contentDescription = "${bucket.window.label()}: ${Money.format(bucket.amountMinor, report.symbol)}" }
+              .semantics { contentDescription = "${bucket.window.label()}: ${if (hiddenAmounts) "Amount hidden" else Money.format(bucket.amountMinor, report.symbol)}" }
               .clickable(role = Role.Button) { onSelect(index) },
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Bottom,
@@ -407,13 +406,14 @@ private fun TrendChart(
         }
       }
     }
-    Text(
-      selectedBucket?.let { "${it.window.label()} · ${Money.format(it.amountMinor, report.symbol)} · ${it.count} transaction${if (it.count == 1) "" else "s"}" }
-        ?: "Swipe through dates, then tap a bar to filter categories.",
+    if (selectedBucket != null) com.joeabouserhal.financetracker.ui.components.PrivateAmount(
+      "${selectedBucket.window.label()} · ${Money.format(selectedBucket.amountMinor, report.symbol)} · ${selectedBucket.count} transactions",
       style = MaterialTheme.typography.bodySmall,
       color = spec.muted,
       modifier = Modifier.heightIn(min = 32.dp),
     )
+    else Text("Swipe through dates, then tap a bar to filter categories.", style = MaterialTheme.typography.bodySmall,
+      color = spec.muted, modifier = Modifier.heightIn(min = 32.dp))
     if (selectedBucket != null) {
       BrButton(
         text = if (period.kind == ReportPeriodKind.YEAR) "CLEAR MONTH FILTER" else "CLEAR DAY FILTER",
@@ -436,7 +436,7 @@ private fun CategoryReportRow(category: CategoryReport, symbol: String, modifier
       Text(category.name, style = MaterialTheme.typography.bodyMedium, color = spec.ink, modifier = Modifier.weight(1f))
       Text(String.format(Locale.getDefault(), "%.1f%%", category.share * 100), style = MaterialTheme.typography.labelSmall, color = spec.muted)
     }
-    Text(compactCurrencyText(category.amountMinor, symbol), style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold, color = spec.ink)
+    com.joeabouserhal.financetracker.ui.components.PrivateAmount(compactCurrencyText(category.amountMinor, symbol), style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold, color = spec.ink)
     Box(Modifier.fillMaxWidth().height(3.dp).background(spec.border.copy(alpha = 0.18f))) {
       Box(Modifier.fillMaxWidth(category.share.toFloat().coerceIn(0f, 1f)).fillMaxHeight().background(color))
     }
@@ -453,7 +453,7 @@ internal fun CategoryDetailsDialog(category: CategoryReport?, symbol: String, pe
         Column(Modifier.fillMaxWidth().padding(bottom = 14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
           Text(periodLabel, style = MaterialTheme.typography.bodySmall, color = spec.muted)
           if (category != null) {
-            Text(compactCurrencyText(category.amountMinor, symbol), style = MaterialTheme.typography.titleLarge, color = spec.ink)
+            com.joeabouserhal.financetracker.ui.components.PrivateAmount(compactCurrencyText(category.amountMinor, symbol), style = MaterialTheme.typography.titleLarge, color = spec.ink)
             Text("${String.format(Locale.getDefault(), "%.1f%%", category.share * 100)} of total · ${category.transactions.size} transactions", style = MaterialTheme.typography.bodySmall, color = spec.muted)
           } else Text("No matching transactions remain in this report.", style = MaterialTheme.typography.bodyMedium, color = spec.muted)
         }

@@ -2,7 +2,6 @@ package com.joeabouserhal.financetracker
 
 import android.os.Bundle
 import android.view.View
-import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.layout.fillMaxSize
@@ -42,14 +41,21 @@ private fun android.content.Intent?.launcherShortcutDestination(): LauncherShort
     else -> null
   }
 
-class MainActivity : ComponentActivity() {
+class MainActivity : com.joeabouserhal.financetracker.data.security.AppLockActivity() {
   private var splashExitAnimation: SplashExitAnimation? = null
   private val launcherShortcutDestination = MutableStateFlow<LauncherShortcutDestination?>(null)
+  private val passwordRecoveryLink = MutableStateFlow<String?>(null)
+
+  private fun readRecovery(intent: android.content.Intent) {
+    intent.data?.toString()?.takeIf(com.joeabouserhal.financetracker.data.auth.PasswordRecovery::isCallback)
+      ?.let { passwordRecoveryLink.value = it }
+  }
 
   override fun onCreate(savedInstanceState: Bundle?) {
     val splashScreen = installSplashScreen()
     super.onCreate(savedInstanceState)
     launcherShortcutDestination.value = intent.launcherShortcutDestination()
+    readRecovery(intent)
 
     val animateLaunch = savedInstanceState == null && launchAnimationsEnabled(this)
     var minimumElapsed = !animateLaunch
@@ -82,6 +88,7 @@ class MainActivity : ComponentActivity() {
     enableEdgeToEdge()
     setContent {
       val shortcutDestination by launcherShortcutDestination.collectAsStateWithLifecycle()
+      val recoveryLink by passwordRecoveryLink.collectAsStateWithLifecycle()
       FinanceTrackerTheme(onReady = { themeReady = true }) {
         val darkTheme = LocalThemeSpec.current.isDark
         SideEffect {
@@ -91,11 +98,15 @@ class MainActivity : ComponentActivity() {
           }
         }
         Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+          com.joeabouserhal.financetracker.ui.security.AppLockGate(this@MainActivity, onLockedReady = { destinationReady = true }) {
           MainNavigation(
+            passwordRecoveryLink = recoveryLink,
+            onRecoveryHandled = { passwordRecoveryLink.value = null; intent.data = null },
             shortcutDestination = shortcutDestination,
             onShortcutHandled = { launcherShortcutDestination.value = null },
             onReady = { destinationReady = true },
           )
+          }
         }
       }
     }
@@ -104,6 +115,7 @@ class MainActivity : ComponentActivity() {
   override fun onNewIntent(intent: android.content.Intent) {
     super.onNewIntent(intent)
     setIntent(intent)
+    readRecovery(intent)
     launcherShortcutDestination.value = intent.launcherShortcutDestination()
   }
 

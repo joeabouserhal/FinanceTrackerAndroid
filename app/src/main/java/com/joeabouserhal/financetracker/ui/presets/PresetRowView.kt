@@ -50,7 +50,7 @@ fun PresetRowView(
     compact = true,
     tint = category?.let { parseHexColor(it.color) } ?: spec.muted,
     detail = {
-      Text(
+      com.joeabouserhal.financetracker.ui.components.PrivateAmount(
         buildAnnotatedString {
           preset.defaultAmount?.let { append(compactCurrencyText(it, currency?.symbol ?: "")) }
             ?: append("Flexible amount")

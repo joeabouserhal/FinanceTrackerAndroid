@@ -60,6 +60,14 @@
   Google account) almost always means the package/SHA-1 above is not registered in Google
   Cloud Console — not that the device lacks an account.
 
+## Password recovery
+
+In Authentication → URL Configuration → Redirect URLs, allow exactly `financetracker://auth/reset-password`.
+Keep the recovery email template's Supabase confirmation link (`{{ .ConfirmationURL }}`); do not replace it with a direct deep link, which would skip verification.
+The app requests PKCE recovery and opens a new-password screen after exchanging the one-use code. Request and open the link on the same phone. An expired/already-used link requires a new request.
+Recovery credentials are held in memory only, separately from normal sign-in and sync; the PKCE verifier persists privately until the email is opened and is excluded from Android backup. No database/schema changes are required.
+Test a complete reset with a disposable email account, plus expired/invalid links, mismatched passwords, offline errors, and normal login afterward. Do not reset a production user's password as part of an automated smoke test.
+
 ## 5. Two-device smoke test checklist (final release)
 Install `app/build/outputs/apk/release/app-release.apk` on two devices (release build = R8-shrunk + signed).
 

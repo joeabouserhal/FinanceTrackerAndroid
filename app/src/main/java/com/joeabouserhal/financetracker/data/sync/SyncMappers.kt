@@ -22,8 +22,7 @@ import kotlinx.serialization.json.contentOrNull
 
 /**
  * Maps server rows (snake_case JSON from PostgREST) to local Room entities.
- * Throws on malformed rows; the engine skips bad rows and retries them on a
- * later sync.
+ * Throws on malformed rows; the complete page and its cursor roll back together.
  */
 object SyncMappers {
 
@@ -67,6 +66,7 @@ object SyncMappers {
       updatedAt = row.reqString("updated_at"),
       syncVersion = row.optString("sync_version") ?: row.reqString("updated_at"),
       deletedAt = row.optString("deleted_at"),
+      openingBalanceMinor = if (row.containsKey("opening_balance")) row.reqLong("opening_balance") else 0,
     )
 
   fun preset(row: JsonObject): PresetEntity =
@@ -109,7 +109,7 @@ object SyncMappers {
 
   fun recurringOccurrence(row: JsonObject): RecurringOccurrenceEntity =
     RecurringOccurrenceEntity(row.reqString("id"), row.reqString("user_id"), row.reqString("schedule_id"), row.reqString("occurrence_key"),
-      RecurringOccurrenceState.valueOf(row.reqString("state").uppercase()), row.reqLong("effective_at"), row.optString("transaction_id"), row.createdAt(), row.reqString("updated_at"), row.optString("sync_version") ?: row.reqString("updated_at"), row.optString("deleted_at"))
+      RecurringOccurrenceState.valueOf(row.reqString("state").uppercase()), row.reqLong("effective_at"), row.optString("transaction_id"), row.createdAt(), row.reqString("updated_at"), row.optString("sync_version") ?: row.reqString("updated_at"), row.optString("deleted_at"), (row.optLong("generation") ?: 0).toInt())
 
   fun transaction(row: JsonObject): TransactionEntity =
     TransactionEntity(
@@ -127,6 +127,7 @@ object SyncMappers {
       presetId = row.optString("preset_id"),
       goalId = row.optString("goal_id"),
       recurrenceOccurrenceId = row.optString("recurrence_occurrence_id"),
+      recurrenceGeneration = (row.optLong("recurrence_generation") ?: 0).toInt(),
       createdAt = row.createdAt(),
       updatedAt = row.reqString("updated_at"),
       syncVersion = row.optString("sync_version") ?: row.reqString("updated_at"),

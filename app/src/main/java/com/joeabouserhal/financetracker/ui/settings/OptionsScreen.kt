@@ -11,10 +11,12 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
@@ -38,6 +40,7 @@ import kotlinx.coroutines.launch
 fun OptionsScreen(
   onOpenCurrenciesAccounts: () -> Unit,
   onOpenThemes: () -> Unit,
+  onOpenAppLock: () -> Unit,
   onOpenCategories: () -> Unit,
   onOpenPresets: () -> Unit,
   onSignIn: () -> Unit,
@@ -56,6 +59,11 @@ fun OptionsScreen(
   var error by remember(session.ownerId) { mutableStateOf<String?>(null) }
   var isSavingName by remember(session.ownerId) { mutableStateOf(false) }
   var showSignOutConfirm by remember(session.ownerId) { mutableStateOf(false) }
+  var showSyncHealth by remember(session.ownerId) { mutableStateOf(false) }
+  var showExport by rememberSaveable(session.ownerId) { mutableStateOf(false) }
+  var discardBatch by remember(session.ownerId) { mutableStateOf<String?>(null) }
+  val pendingOps by remember(session.ownerId) { container.appDatabase.outboxDao().observeForOwner(session.ownerId) }
+    .collectAsStateWithLifecycle(initialValue = emptyList())
   val currentProfile = profile?.takeIf { it.ownerId == session.ownerId }
   val savedName = currentProfile?.name?.trim().orEmpty()
   LaunchedEffect(session.ownerId, currentProfile, isEditingName) {
@@ -117,6 +125,17 @@ fun OptionsScreen(
       item("appearance") {
         SettingsGroup("APPEARANCE") {
           DestinationRow("Themes", R.drawable.ic_tab_settings, onOpenThemes)
+          SettingsDivider()
+          Row(Modifier.fillMaxWidth().padding(start = 14.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text("Hide amounts", color = spec.ink, modifier = Modifier.weight(1f))
+            com.joeabouserhal.financetracker.ui.components.AmountVisibilityToggle()
+          }
+        }
+      }
+
+      item("security") {
+        SettingsGroup(stringResource(R.string.app_lock_security)) {
+          DestinationRow(stringResource(R.string.app_lock_title), R.drawable.ic_lock, onOpenAppLock)
         }
       }
 
@@ -127,12 +146,17 @@ fun OptionsScreen(
           DestinationRow("Categories", R.drawable.ic_tab_categories, onOpenCategories)
           SettingsDivider()
           DestinationRow("Presets", R.drawable.ic_tab_presets, onOpenPresets)
+          SettingsDivider()
+          DestinationRow("Export transactions (CSV)", R.drawable.ic_export, { showExport = true })
         }
       }
 
       item("sync") {
         SettingsGroup("SYNC") {
           SyncSummary(syncStatus, onSync = { container.syncScheduler.requestSyncNow() })
+          if (!session.isGuest && pendingOps.isNotEmpty()) {
+            TextAction("REVIEW PENDING CHANGES", onClick = { showSyncHealth = true }, modifier = Modifier.padding(horizontal = 14.dp))
+          }
         }
       }
 
@@ -150,6 +174,7 @@ fun OptionsScreen(
     }
   }
 
+  if (showExport) com.joeabouserhal.financetracker.ui.transactions.ExportTransactionsDialog(onDismiss = { showExport = false })
   if (showSignOutConfirm) {
     BrDialog(
       title = "SIGN OUT?",
@@ -157,16 +182,54 @@ fun OptionsScreen(
       confirmText = "SIGN OUT",
       onConfirm = {
         scope.launch {
+          try {
           container.authRepository.signOut()
           container.sessionManager.signOutToGuest()
           container.syncScheduler.cancelAll()
           container.sessionManager.resetAuthChoice()
           showSignOutConfirm = false
+          } catch (e: kotlinx.coroutines.CancellationException) { throw e }
+          catch (_: Exception) { error = "Could not clear the local session. Please try signing out again."; showSignOutConfirm = false }
         }
       },
     ) {
       Text("Nothing is deleted. Your data stays on this device and in the cloud. Syncing stops until you sign back in.",
         style = MaterialTheme.typography.bodyMedium, color = spec.ink)
+    }
+  }
+  if (showSyncHealth) {
+    BrDialog(title = "SYNC HEALTH", onDismiss = { showSyncHealth = false }, dismissText = "CLOSE", scrollContent = true) {
+      Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        if (pendingOps.isEmpty()) Text("All changes are synced.", color = spec.muted)
+        pendingOps.groupBy { it.batchId }.forEach { (batchId, operations) ->
+          Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(operations.map { it.tableName.replace('_', ' ') }.distinct().joinToString(" · "), color = spec.ink,
+              style = MaterialTheme.typography.titleSmall)
+            operations.map { op ->
+              runCatching {
+                val payload = kotlinx.serialization.json.Json.parseToJsonElement(op.payloadJson) as kotlinx.serialization.json.JsonObject
+                (payload["name"] ?: payload["title"] ?: payload["id"])?.toString()?.trim('"') ?: "Profile"
+              }.getOrDefault("Record")
+            }.distinct().forEach { Text(it, color = spec.muted, style = MaterialTheme.typography.bodySmall) }
+            Text(operations.firstNotNullOfOrNull { it.lastError } ?: "Waiting to sync", color = spec.muted,
+              style = MaterialTheme.typography.bodySmall)
+            Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+              TextAction("RETRY", enabled = !syncStatus.isSyncing, onClick = {
+                scope.launch { container.appDatabase.outboxDao().retryBatch(session.ownerId, batchId); container.syncScheduler.requestSyncNow() }
+              })
+              TextAction("DISCARD", enabled = !syncStatus.isSyncing, tone = spec.expense, onClick = { discardBatch = batchId })
+            }
+          }
+        }
+      }
+    }
+  }
+  discardBatch?.let { batchId ->
+    BrDialog(title = "DISCARD PENDING CHANGES?", onDismiss = { discardBatch = null }, confirmText = "DISCARD",
+      onConfirm = {
+        scope.launch { container.appDatabase.outboxDao().discardBatch(session.ownerId, batchId); discardBatch = null }
+      }) {
+      Text("Stops uploading this entire action. Local records are kept, but other devices may differ until you edit them again. Use Retry if you want to keep syncing these changes.", color = spec.ink)
     }
   }
 }
@@ -237,13 +300,16 @@ private fun SyncSummary(status: SyncStatus, onSync: () -> Unit) {
       }
     }
     if (status.isGuest) {
-      Text("Guest records are stored locally.", style = MaterialTheme.typography.bodySmall, color = spec.muted,
+      Text("Guest records stay on this device only. Uninstalling the app or losing the phone removes them.", style = MaterialTheme.typography.bodySmall, color = spec.muted,
         modifier = Modifier.padding(bottom = 6.dp))
     } else {
       val pending = if (status.pendingCount == 0) "No pending changes" else "${status.pendingCount} pending"
       val lastSync = status.lastSyncAt?.let { "Last synced ${Dates.formatInstantLabel(it)}" } ?: "No sync yet"
       Text("$pending · $lastSync", style = MaterialTheme.typography.bodySmall, color = spec.muted,
         modifier = Modifier.padding(bottom = 6.dp))
+      status.lastPushAt?.let { Text("Last upload ${Dates.formatInstantLabel(it)}", style = MaterialTheme.typography.bodySmall, color = spec.muted) }
+      status.lastPullAt?.let { Text("Last download ${Dates.formatInstantLabel(it)}", style = MaterialTheme.typography.bodySmall, color = spec.muted) }
+      if (status.conflictsResolved > 0) Text("${status.conflictsResolved} conflicts resolved", style = MaterialTheme.typography.bodySmall, color = spec.muted)
       if (status.retryingCount > 0 || status.actionRequiredCount > 0) {
         Text("${status.retryingCount} retrying · ${status.actionRequiredCount} need attention",
           style = MaterialTheme.typography.bodySmall, color = spec.muted)

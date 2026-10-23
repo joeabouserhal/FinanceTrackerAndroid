@@ -38,6 +38,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import kotlinx.coroutines.flow.flowOn
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -78,6 +79,7 @@ fun TransactionsScreen(
   onAddFromPreset: () -> Unit,
   onEditTransaction: (String) -> Unit,
   onTransfer: () -> Unit = {},
+  onDuplicateTransaction: (String) -> Unit = {},
 ) {
   val container = rememberAppContainer()
   val spec = LocalThemeSpec.current
@@ -85,21 +87,26 @@ fun TransactionsScreen(
   val session by container.sessionManager.session.collectAsStateWithLifecycle(initialValue = Session())
   val ownerId = session.ownerId
 
-  var filters by rememberSaveable(stateSaver = TransactionFilterStateSaver) { mutableStateOf(TransactionFilterState()) }
-  var filtersOpen by rememberSaveable { mutableStateOf(false) }
-  var deleteTarget by remember { mutableStateOf<TransactionListItem?>(null) }
+  var filters by rememberSaveable(ownerId, stateSaver = TransactionFilterStateSaver) { mutableStateOf(TransactionFilterState()) }
+  var filtersOpen by rememberSaveable(ownerId) { mutableStateOf(false) }
+  var showExport by rememberSaveable(ownerId) { mutableStateOf(false) }
+  var deleteTarget by remember(ownerId) { mutableStateOf<TransactionListItem?>(null) }
+  var visibleLimit by rememberSaveable(ownerId, filters) { mutableStateOf(100) }
 
-  val items by remember(ownerId) {
+  val itemSnapshot by remember(ownerId, filters, visibleLimit) {
     combine(
-      container.transactionRepository.observeAll(ownerId),
+      container.transactionRepository.observePage(TransactionFiltering.pageQuery(ownerId, filters, visibleLimit + 1)),
       container.categoryRepository.observeByType(ownerId, TransactionType.INCOME),
       container.categoryRepository.observeByType(ownerId, TransactionType.EXPENSE),
-      container.accountRepository.observeActive(ownerId),
+      container.accountRepository.observeAll(ownerId),
       container.currencyRepository.observeAll(ownerId),
     ) { txs, incomeCategories, expenseCategories, accounts, currencies ->
-      enrichTransactions(txs, incomeCategories + expenseCategories, accounts, currencies)
-    }
-  }.collectAsStateWithLifecycle(initialValue = emptyList())
+      ownerId to TransactionFiltering.apply(enrichTransactions(txs, incomeCategories + expenseCategories, accounts, currencies), filters).take(visibleLimit + 1)
+    }.flowOn(kotlinx.coroutines.Dispatchers.Default)
+  }.collectAsStateWithLifecycle(initialValue = ownerId to emptyList())
+  val loadedItems = itemSnapshot.takeIf { it.first == ownerId }?.second.orEmpty()
+  val items = loadedItems.take(visibleLimit)
+  val hasMore = loadedItems.size > visibleLimit
 
   val currencies by remember(ownerId) { container.currencyRepository.observeAll(ownerId) }
     .collectAsStateWithLifecycle(initialValue = emptyList())
@@ -126,7 +133,12 @@ fun TransactionsScreen(
 
   Box(Modifier.fillMaxSize().background(spec.background)) {
     Column(Modifier.fillMaxSize()) {
-      ScreenHeader(title = "Transactions")
+      Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        ScreenHeader(title = "Transactions", modifier = Modifier.weight(1f))
+        androidx.compose.material3.IconButton(onClick = { showExport = true }, modifier = Modifier.padding(end = 12.dp)) {
+          androidx.compose.material3.Icon(androidx.compose.ui.res.painterResource(R.drawable.ic_export), "Export transactions", tint = spec.muted)
+        }
+      }
 
     Column(
       Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
@@ -172,7 +184,7 @@ fun TransactionsScreen(
     Box(Modifier.weight(1f)) {
       if (visible.isEmpty()) {
         EmptyState(
-          message = if (items.isEmpty()) "No transactions yet. Tap + to add one." else "No transactions match your filters.",
+          message = if (filters.isDefault()) "No transactions yet. Tap + to add one." else "No transactions match your search or filters.",
           modifier = Modifier.fillMaxWidth().padding(16.dp),
         )
       } else {
@@ -186,7 +198,7 @@ fun TransactionsScreen(
             }
             itemsIndexed(groupItems, key = { _, item -> item.transaction.id }) { index, item ->
               Column(Modifier.animateItem()) {
-                SwipeRevealRow(onDelete = { deleteTarget = item }) {
+                SwipeRevealRow(onDelete = { deleteTarget = item }, onDuplicate = { onDuplicateTransaction(item.transaction.id) }) {
                   TransactionRow(
                     item = item,
                     onPress = { onEditTransaction(item.transaction.id) },
@@ -197,6 +209,10 @@ fun TransactionsScreen(
                 }
               }
             }
+          }
+          if (hasMore) item("load-more") {
+            BrButton("SHOW MORE", onClick = { visibleLimit += 100 }, style = BrButtonStyle.OUTLINE,
+              modifier = Modifier.padding(top = 12.dp))
           }
         }
       }
@@ -218,6 +234,7 @@ fun TransactionsScreen(
     }
   }
 
+  if (showExport) ExportTransactionsDialog(filters, onDismiss = { showExport = false })
   deleteTarget?.let { item ->
     val tx = item.transaction
     val amount = if (tx.type == TransactionType.INCOME || tx.type == TransactionType.TRANSFER) tx.amount else -tx.amount
@@ -244,7 +261,7 @@ fun TransactionsScreen(
           style = MaterialTheme.typography.labelSmall,
           color = spec.muted,
         )
-        Text(
+        com.joeabouserhal.financetracker.ui.components.PrivateAmount(
           Money.format(amount, item.currencySymbol),
           style = MaterialTheme.typography.titleLarge,
           color = if (tx.type == TransactionType.TRANSFER) spec.transfer else if (amount < 0) spec.expense else spec.income,
@@ -262,14 +279,14 @@ fun TransactionsScreen(
   }
 }
 
-/** Left-swipe reveals a DELETE action behind the row; nothing is removed
- * until the caller confirms. */
-private enum class RevealState { Closed, Open }
+/** Swiping only reveals an action. Both COPY and DELETE require an explicit tap. */
+private enum class RevealState { Closed, Open, Duplicate }
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun SwipeRevealRow(
+internal fun SwipeRevealRow(
   onDelete: () -> Unit,
+  onDuplicate: () -> Unit,
   modifier: Modifier = Modifier,
   content: @Composable () -> Unit,
 ) {
@@ -285,45 +302,42 @@ private fun SwipeRevealRow(
           DraggableAnchors {
             RevealState.Closed at 0f
             RevealState.Open at -actionWidthPx
+            RevealState.Duplicate at actionWidthPx
           },
         )
       }
     }
-
   Box(modifier) {
-    // Revealed action strip, behind the row's right edge: red 88dp-wide area
-    // with a thin separator at its left edge and DELETE centered inside it.
-    Box(
+    val offset = state.requireOffset()
+    val copyRevealed = offset > 0f
+    if (offset != 0f) Box(
       Modifier
         .matchParentSize()
-        .background(spec.expense),
-      contentAlignment = Alignment.CenterEnd,
+        .background(if (copyRevealed) spec.accent else spec.expense),
+      contentAlignment = if (copyRevealed) Alignment.CenterStart else Alignment.CenterEnd,
     ) {
       Box(
         Modifier
           .fillMaxHeight()
-          .width(88.dp),
+          .width(88.dp)
+          .clickable(role = androidx.compose.ui.semantics.Role.Button) {
+            scope.launch { state.animateTo(RevealState.Closed) }
+            if (copyRevealed) onDuplicate() else onDelete()
+          },
         contentAlignment = Alignment.Center,
       ) {
         Box(
           Modifier
-            .align(Alignment.CenterStart)
+            .align(if (copyRevealed) Alignment.CenterEnd else Alignment.CenterStart)
             .fillMaxHeight()
             .width(2.dp)
             .background(spec.onAccent.copy(alpha = 0.85f)),
         )
         Text(
-          "DELETE",
+          if (copyRevealed) "COPY" else "DELETE",
           style = MaterialTheme.typography.labelMedium,
           color = spec.onAccent,
-          modifier =
-            Modifier
-              .minimumInteractiveComponentSize()
-              .clickable {
-                scope.launch { state.animateTo(RevealState.Closed) }
-                onDelete()
-              }
-              .padding(4.dp),
+          modifier = Modifier.padding(4.dp),
         )
       }
     }

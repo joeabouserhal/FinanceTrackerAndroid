@@ -5,6 +5,7 @@ import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import androidx.room.Update
+import androidx.room.Upsert
 import com.joeabouserhal.financetracker.data.local.entities.AccountEntity
 import kotlinx.coroutines.flow.Flow
 
@@ -28,10 +29,10 @@ interface AccountDao {
   @Query("SELECT * FROM accounts WHERE owner_id = :ownerId AND id = :id")
   suspend fun getById(ownerId: String, id: String): AccountEntity?
 
-  @Insert(onConflict = OnConflictStrategy.REPLACE)
+  @Upsert
   suspend fun upsert(entity: AccountEntity)
 
-  @Insert(onConflict = OnConflictStrategy.REPLACE)
+  @Upsert
   suspend fun upsertAll(entities: List<AccountEntity>)
 
   /** Sync pull inserts: never replace (REPLACE cascades to child tables). */
